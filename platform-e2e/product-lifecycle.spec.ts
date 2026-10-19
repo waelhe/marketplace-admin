@@ -8,6 +8,7 @@ import type {
   StoreProductAttributeValuesQueryVariables,
   StoreProductRosterQuery,
   StoreProductRosterQueryVariables,
+  StoreProductTypesQuery,
   StoreProductVariantAttributeValuesQuery,
   StoreProductVariantAttributeValuesQueryVariables,
   StoreProductVariantsQuery,
@@ -167,7 +168,14 @@ test("typed catalog lifecycle uses generated GraphQL operations through the actu
     accessToken,
   );
   const rosterData = await graphQlData<StoreProductRosterQuery>(roster, "initial generated GraphQL roster");
-  const configuredType = rosterData.storeProductTypes.find(type => type.id === productTypeId);
+  const typesResponse = await graphQl(
+    request,
+    operation("store-product-types.graphql"),
+    {},
+    accessToken,
+  );
+  const typesData = await graphQlData<StoreProductTypesQuery>(typesResponse, "generated GraphQL ProductTypes");
+  const configuredType = typesData.storeProductTypes.find(type => type.id === productTypeId);
   expect(configuredType, "the configured ProductType must be available through GraphQL").toBeTruthy();
   if (!configuredType) throw new Error("Configured ProductType is absent from the generated GraphQL response.");
 
