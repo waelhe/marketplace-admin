@@ -496,7 +496,7 @@ export default function MarketplaceAdminApp() {
                     <option key={type.id} value={type.id}>{productTypeLabel(type)} ({type.code})</option>
                   ))}
                 </select>
-                <small>Choose a ProductType to create a draft. ProductType attribute and variant editing will be separate typed GraphQL journeys.</small>
+                <small>Choose a product type. Required product attributes and variant-selection options are collected below before publication. All catalog actions use GraphQL.</small>
               </label>
               {selectedProductType && (
                 <p className="ma-inline-note" data-testid="selected-product-type">
@@ -537,6 +537,112 @@ export default function MarketplaceAdminApp() {
             )}
           </div>
         </form>
+
+        {editingId && productAttributes.length > 0 && (
+          <section className="ma-subpanel" aria-labelledby="product-attributes-title" data-testid="product-attributes-editor">
+            <div className="ma-panel__heading">
+              <div>
+                <h3 id="product-attributes-title">Product attributes</h3>
+                <p>Typed values are checked by the catalog and read back after saving.</p>
+              </div>
+              <button
+                data-testid="save-product-attributes"
+                className="ma-button ma-button--primary"
+                type="button"
+                onClick={() => void saveProductAttributes()}
+                disabled={saving}
+              >
+                Save attributes
+              </button>
+            </div>
+            <TypedAttributeFields
+              attributes={productAttributes}
+              values={productAttributeValues}
+              onChange={setProductAttributeValue}
+              testIdPrefix="product"
+            />
+          </section>
+        )}
+
+        {editingId && selectedProductType && (
+          <section className="ma-subpanel" aria-labelledby="variants-title" data-testid="variants-editor">
+            <div className="ma-panel__heading">
+              <div>
+                <h3 id="variants-title">Purchasable variants</h3>
+                <p>Each variant has its own SKU and price. Selection attributes must form a unique combination.</p>
+              </div>
+              <span className="ma-count">{variants.length} variants</span>
+            </div>
+            {variants.length > 0 && (
+              <div className="ma-table-wrap">
+                <table className="ma-table">
+                  <thead><tr><th>SKU</th><th>Name</th><th>Price</th><th>Status</th><th>Stock</th></tr></thead>
+                  <tbody>
+                    {variants.map(variant => (
+                      <tr key={variant.id} data-testid={`variant-row-${variant.id}`}>
+                        <td><strong>{variant.sku}</strong><small>{variant.id}</small></td>
+                        <td>{variant.name || "—"}</td>
+                        <td>{formatPrice(variant.priceMinor, variant.currency)}</td>
+                        <td>{variant.status}</td>
+                        <td>{variant.stockQuantity - variant.reservedQuantity} available</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <form onSubmit={createVariant} className="ma-form" data-testid="variant-editor">
+              <h4>Create variant</h4>
+              <div className="ma-form__grid">
+                <label>
+                  SKU
+                  <input
+                    data-testid="variant-sku"
+                    name="sku"
+                    value={variantSku}
+                    onChange={event => setVariantSku(event.target.value)}
+                    required
+                    maxLength={100}
+                  />
+                </label>
+                <label>
+                  Variant price
+                  <input
+                    data-testid="variant-price"
+                    name="variantPrice"
+                    type="number"
+                    min="0"
+                    step={10 ** -currencyFractionDigits(editor.currency.toUpperCase())}
+                    value={variantPrice}
+                    onChange={event => setVariantPrice(event.target.value)}
+                    required
+                  />
+                </label>
+              </div>
+              <label>
+                Variant name
+                <input
+                  data-testid="variant-name"
+                  name="variantName"
+                  value={variantName}
+                  onChange={event => setVariantName(event.target.value)}
+                  maxLength={200}
+                />
+              </label>
+              <TypedAttributeFields
+                attributes={variantAttributes}
+                values={variantAttributeValues}
+                onChange={setVariantAttributeValue}
+                testIdPrefix="variant"
+              />
+              <div className="ma-form__actions">
+                <button data-testid="create-variant" className="ma-button ma-button--primary" type="submit" disabled={saving}>
+                  {saving ? "Saving…" : "Create variant"}
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
 
         {readBack && (
           <section className="ma-readback" data-testid="published-readback" aria-label="Verified API read-back">
