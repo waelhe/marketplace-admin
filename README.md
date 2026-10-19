@@ -140,6 +140,10 @@ See [e2e/README.md](e2e/README.md) for the seeds, the actors and how to port a s
 
 ## Platform integration
 
-This downstream copy is pinned to Saleor Dashboard 3.23.39. Platform-specific REST contracts,
-OAuth/BFF boundaries and acceptance evidence are documented in [PLATFORM_INTEGRATION.md](./PLATFORM_INTEGRATION.md).
-See the dedicated workflows for the pinned build and the Spring REST Playwright lifecycle.
+This downstream copy is pinned to Saleor Dashboard 3.23.39. Platform-specific GraphQL contracts,
+OAuth/BFF boundaries, the shared-production acceptance workflow, and its retained test-data behavior
+are documented in [PLATFORM_INTEGRATION.md](./PLATFORM_INTEGRATION.md).
+Catalog operations use generated typed GraphQL documents from the platform's published schema.
+The Spring-backed Playwright lifecycle runs against the configured shared Railway production service
+only after explicit confirmation; it publishes a clearly labelled E2E product and intentionally leaves
+the record active for inspection.
