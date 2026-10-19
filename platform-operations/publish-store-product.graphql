@@ -1,0 +1,13 @@
+mutation PublishStoreProduct($id: ID!) {
+  publishStoreProduct(id: $id) {
+    id
+    storeCategoryCode
+    title
+    description
+    priceMinor
+    currency
+    providerId
+    productTypeId
+    status
+  }
+}
