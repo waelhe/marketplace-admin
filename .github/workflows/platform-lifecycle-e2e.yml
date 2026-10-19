@@ -1,4 +1,4 @@
-name: Marketplace Admin — Spring REST lifecycle E2E
+name: Marketplace Admin — Spring GraphQL lifecycle E2E
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   product-lifecycle:
-    name: Browser create → edit → publish → API read-back
+    name: Browser create → edit → publish → GraphQL read-back
     runs-on: ubuntu-latest
     timeout-minutes: 25
     # Configure this protected environment with a dedicated non-production backend.
@@ -128,7 +128,7 @@ jobs:
           cat /tmp/marketplace-admin-proxy.log
           exit 1
 
-      - name: Run browser-based Spring REST lifecycle
+      - name: Run browser-based Spring GraphQL lifecycle
         working-directory: dashboard
         env:
           CI: "true"
