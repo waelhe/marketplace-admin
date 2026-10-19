@@ -3,16 +3,13 @@ name: Marketplace Admin — Spring GraphQL lifecycle E2E
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: "Backend target for the Spring GraphQL lifecycle test"
-        type: choice
-        options:
-          - non-production
-          - production
-        default: non-production
+      confirm_shared_production_test:
+        description: "This test publishes an E2E product to the shared Railway production catalog and intentionally leaves it active."
+        type: boolean
+        default: false
         required: true
-  # The workflow is not dispatchable until it exists on the default branch.
-  # Before merge, deliberate PR labels can request a non-production or owner-approved production run.
+  # Before this workflow exists on the default branch, only this explicit PR label
+  # can trigger the same mutating production test. Ordinary PR updates never run it.
   pull_request:
     types: [labeled]
     paths:
@@ -34,16 +31,16 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
-       (contains(github.event.pull_request.labels.*.name, 'run-spring-e2e') ||
-        contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production')))
+       contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production'))
     name: Browser create → edit → publish → GraphQL read-back
     runs-on: ubuntu-latest
     timeout-minutes: 25
     # Keep credentials in this protected environment; production is selected explicitly.
     environment: marketplace-e2e
     env:
-      MARKETPLACE_E2E_TARGET_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.target || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production') && 'production') || 'non-production' }}
-      MARKETPLACE_E2E_API_ORIGIN: ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'production' || github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production')) && vars.MARKETPLACE_PRODUCTION_API_ORIGIN || vars.MARKETPLACE_E2E_API_ORIGIN }}
+      MARKETPLACE_E2E_CONFIRM_SHARED_PRODUCTION: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_shared_production_test || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production')) }}
+      MARKETPLACE_E2E_TARGET_MODE: shared-production
+      MARKETPLACE_E2E_API_ORIGIN: ${{ vars.MARKETPLACE_PRODUCTION_API_ORIGIN }}
       MARKETPLACE_E2E_CLIENT_ID: ${{ vars.MARKETPLACE_E2E_CLIENT_ID }}
       MARKETPLACE_E2E_CLIENT_SECRET: ${{ secrets.MARKETPLACE_E2E_CLIENT_SECRET }}
       MARKETPLACE_E2E_USERNAME: ${{ secrets.MARKETPLACE_E2E_USERNAME }}
@@ -101,33 +98,22 @@ jobs:
           --moduleResolution Bundler --strict --skipLibCheck --types node
           e2e-marketplace-admin/product-lifecycle.spec.ts
 
-      - name: Validate explicitly selected target and credentials
+      - name: Validate shared-production confirmation and credentials
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
-            echo "::error::Set the repository/environment variable MARKETPLACE_PRODUCTION_API_ORIGIN to the live service origin; no stale fallback is used."
+          test "$MARKETPLACE_E2E_CONFIRM_SHARED_PRODUCTION" = "true" || {
+            echo "::error::Confirm the shared-production lifecycle test explicitly. It publishes a clearly labelled product and leaves it active."
             exit 1
           }
-          case "$MARKETPLACE_E2E_TARGET_MODE" in
-            production)
-              test "$MARKETPLACE_E2E_API_ORIGIN" = "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
-                echo "::error::Production mode must target the configured Railway production origin."
-                exit 1
-              }
-              ;;
-            non-production)
-              test -n "$MARKETPLACE_E2E_API_ORIGIN"
-              test "$MARKETPLACE_E2E_API_ORIGIN" != "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
-                echo "::error::Production origin requires explicit production target selection."
-                exit 1
-              }
-              ;;
-            *)
-              echo "::error::Unknown MARKETPLACE_E2E_TARGET_MODE."
-              exit 1
-              ;;
-          esac
+          test -n "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
+            echo "::error::Set the protected marketplace-e2e variable MARKETPLACE_PRODUCTION_API_ORIGIN to the live Railway service origin."
+            exit 1
+          }
+          test "$MARKETPLACE_E2E_API_ORIGIN" = "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
+            echo "::error::The shared-production test target must match MARKETPLACE_PRODUCTION_API_ORIGIN exactly."
+            exit 1
+          }
           test -n "$MARKETPLACE_E2E_CLIENT_ID"
           test -n "$MARKETPLACE_E2E_CLIENT_SECRET"
           test -n "$MARKETPLACE_E2E_USERNAME"
@@ -138,20 +124,16 @@ jobs:
           node --input-type=module -e '
             const api = new URL(process.env.MARKETPLACE_E2E_API_ORIGIN);
             if (!["http:", "https:"].includes(api.protocol) || api.pathname !== "/" || api.search || api.hash) {
-              throw new Error("MARKETPLACE_E2E_API_ORIGIN must be a backend origin only, with no path/query/hash");
+              throw new Error("MARKETPLACE_PRODUCTION_API_ORIGIN must be an HTTP(S) origin only, without path/query/hash");
             }
-            const production = new URL(process.env.MARKETPLACE_PRODUCTION_API_ORIGIN);
-            const mode = process.env.MARKETPLACE_E2E_TARGET_MODE;
-            if (mode === "production" && api.origin !== production.origin) {
-              throw new Error("Production mode must use the configured production origin.");
+            const configuredProduction = new URL(process.env.MARKETPLACE_PRODUCTION_API_ORIGIN);
+            if (api.origin !== configuredProduction.origin) {
+              throw new Error("The E2E request target must be the configured shared production origin.");
             }
-            if (mode !== "production" && api.origin === production.origin) {
-              throw new Error("Production origin requires explicit production target selection.");
-            }
-            console.log("E2E target mode " + mode + " validated for " + api.origin + ".");
+            console.log("Shared Railway production/test backend validated for " + api.origin + ".");
           '
           curl --fail --silent --show-error "$MARKETPLACE_E2E_API_ORIGIN/actuator/health/liveness" >/dev/null || {
-            echo "::error::The selected Spring backend is not responding on /actuator/health/liveness."
+            echo "::error::The shared Railway production Spring backend is not responding on /actuator/health/liveness."
             exit 1
           }
 
@@ -180,7 +162,7 @@ jobs:
           cat /tmp/marketplace-admin-preview.log
           exit 1
 
-      - name: Start same-origin proxy to dedicated Spring backend
+      - name: Start same-origin proxy to shared Railway production backend
         run: |
           node scripts/e2e-proxy.mjs > /tmp/marketplace-admin-proxy.log 2>&1 &
           echo $! > /tmp/marketplace-admin-proxy.pid
