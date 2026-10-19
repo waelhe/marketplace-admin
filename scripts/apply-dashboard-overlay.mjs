@@ -62,6 +62,25 @@ ${normalRender.split("\n").map(line => `  ${line}`).join("\n")}
 entry = entry.slice(0, renderStart + 1) + overlayRender;
 await write(entryPath, entry);
 
+const navigationPath = "src/components/Sidebar/menu/hooks/useMenuStructure.tsx";
+let navigation = await read(navigationPath);
+const navigationAnchor = "  const menuItems: SidebarMenuItem[] = [\\n";
+requireShape(navigation.includes(navigationAnchor), "the pinned sidebar menu structure marker changed");
+if (!navigation.includes('id: "marketplace-admin"')) {
+  navigation = navigation.replace(
+    navigationAnchor,
+    navigationAnchor + `    {
+      icon: renderIcon(<ProductsIcon />),
+      label: "Marketplace catalog",
+      id: "marketplace-admin",
+      url: "/marketplace-admin",
+      type: "item",
+    },
+`,
+  );
+  await write(navigationPath, navigation);
+}
+
 const sourceDir = join(repoRoot, "dashboard-overlay");
 const targetDir = join(dashboardRoot, "src/marketplaceAdmin");
 await mkdir(targetDir, { recursive: true });
