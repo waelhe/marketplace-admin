@@ -74,6 +74,7 @@ if (!navigation.includes('id: "marketplace-admin"')) {
       label: "Marketplace catalog",
       id: "marketplace-admin",
       url: "/marketplace-admin",
+      onClick: () => { window.location.assign("/marketplace-admin"); },
       type: "item",
     },
 `,
