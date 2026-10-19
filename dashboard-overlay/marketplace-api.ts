@@ -1,15 +1,19 @@
-import storeProductRosterDocument from "@platform-operations/store-product-roster.graphql?raw";
-import readStoreProductDocument from "@platform-operations/read-store-product.graphql?raw";
-import storeProductTypesDocument from "@platform-operations/store-product-types.graphql?raw";
-import storeProductAttributeValuesDocument from "@platform-operations/store-product-attribute-values.graphql?raw";
-import replaceStoreProductAttributesDocument from "@platform-operations/replace-store-product-attributes.graphql?raw";
-import storeProductVariantsDocument from "@platform-operations/store-product-variants.graphql?raw";
-import storeProductVariantAttributeValuesDocument from "@platform-operations/store-product-variant-attribute-values.graphql?raw";
-import createStoreProductVariantDocument from "@platform-operations/create-store-product-variant.graphql?raw";
-import createStoreProductDocument from "@platform-operations/create-store-product.graphql?raw";
-import updateStoreProductDocument from "@platform-operations/update-store-product.graphql?raw";
-import publishStoreProductDocument from "@platform-operations/publish-store-product.graphql?raw";
+import {
+  CreateStoreProductDocument,
+  CreateStoreProductVariantDocument,
+  PublishStoreProductDocument,
+  ReadStoreProductDocument,
+  ReplaceStoreProductAttributesDocument,
+  StoreProductAttributeValuesDocument,
+  StoreProductRosterDocument,
+  StoreProductTypesDocument,
+  StoreProductVariantAttributeValuesDocument,
+  StoreProductVariantsDocument,
+  UpdateStoreProductDocument,
+} from "./generated/platform-operations";
 
+import { print } from "graphql";
+import type { TypedDocumentNode } from "@graphql-typed-document-node/core";
 import type {
   StoreProduct,
   StoreProductAttributeScope,
@@ -25,31 +29,9 @@ import type {
   StoreProductVariantCreateInput,
   StoreProductVariantStatus,
   StoreProductStatus,
-  StoreProductRosterQuery,
-  StoreProductRosterQueryVariables,
-  ReadStoreProductQuery,
-  ReadStoreProductQueryVariables,
-  StoreProductTypesQuery,
-  StoreProductAttributeValuesQuery,
-  StoreProductAttributeValuesQueryVariables,
-  ReplaceStoreProductAttributesMutation,
-  ReplaceStoreProductAttributesMutationVariables,
-  StoreProductVariantsQuery,
-  StoreProductVariantsQueryVariables,
-  StoreProductVariantAttributeValuesQuery,
-  StoreProductVariantAttributeValuesQueryVariables,
-  CreateStoreProductVariantMutation,
-  CreateStoreProductVariantMutationVariables,
-  CreateStoreProductMutation,
-  CreateStoreProductMutationVariables,
-  UpdateStoreProductMutation,
-  UpdateStoreProductMutationVariables,
-  PublishStoreProductMutation,
-  PublishStoreProductMutationVariables,
 } from "./generated/platform-operations";
 
-// Domain-facing names are aliases of GraphQL Code Generator's SDL-derived types.
-// Do not introduce parallel handwritten wire models here.
+// Domain-facing names remain aliases of generated SDL types, not handwritten wire models.
 export type PlatformProductStatus = StoreProductStatus;
 export type PlatformVariantStatus = StoreProductVariantStatus;
 export type PlatformAttributeValueType = StoreProductAttributeValueType;
@@ -77,7 +59,7 @@ type GraphQlEnvelope<TData> = {
 
 declare global {
   interface Window {
-    /** Injected only by the isolated Playwright build. Never persisted in storage. */
+    /** Injected only by an E2E-only build. Production uses the authenticated edge/BFF. */
     __MARKETPLACE_E2E_ACCESS_TOKEN__?: string;
   }
 }
@@ -85,9 +67,9 @@ declare global {
 const GRAPHQL_URL = import.meta.env.VITE_MARKETPLACE_GRAPHQL_URL || "/graphql";
 const E2E_MODE = import.meta.env.VITE_MARKETPLACE_E2E_MODE === "true";
 
-async function graphQl<TData, TVariables extends object = Record<string, never>>(
-  query: string,
-  variables: TVariables = {} as TVariables,
+async function graphQl<TData, TVariables>(
+  document: TypedDocumentNode<TData, TVariables>,
+  variables?: TVariables,
 ): Promise<TData> {
   const headers = new Headers({ Accept: "application/json", "Content-Type": "application/json" });
 
@@ -100,7 +82,7 @@ async function graphQl<TData, TVariables extends object = Record<string, never>>
     method: "POST",
     headers,
     credentials: "same-origin",
-    body: JSON.stringify({ query, variables }),
+    body: JSON.stringify({ query: print(document), variables: variables ?? {} }),
   });
 
   if (!response.ok) {
@@ -122,44 +104,37 @@ export const marketplaceApi = {
     const products: PlatformProduct[] = [];
     let after: string | null = null;
     const maxPages = 100;
+
     for (let page = 0; page < maxPages; page++) {
-      const data: StoreProductRosterQuery = await graphQl<
-        StoreProductRosterQuery,
-        StoreProductRosterQueryVariables
-      >(storeProductRosterDocument, { first: 50, after });
+      const data = await graphQl(StoreProductRosterDocument, { first: 50, after });
       const edges = data.storeProducts.edges ?? [];
       for (const edge of edges) {
         if (edge?.node) products.push(edge.node);
       }
-      const pageInfo: StoreProductRosterQuery["storeProducts"]["pageInfo"] = data.storeProducts.pageInfo;
+      const pageInfo = data.storeProducts.pageInfo;
       if (!pageInfo.hasNextPage) return products;
       if (!pageInfo.endCursor || pageInfo.endCursor === after) {
         throw new Error("GraphQL product pagination returned no advancing endCursor.");
       }
       after = pageInfo.endCursor;
     }
+
     throw new Error("Product roster exceeds the 5,000-item administration safety bound.");
   },
 
   async getProduct(id: string): Promise<PlatformProduct> {
-    const data = await graphQl<ReadStoreProductQuery, ReadStoreProductQueryVariables>(
-      readStoreProductDocument,
-      { id },
-    );
+    const data = await graphQl(ReadStoreProductDocument, { id });
     if (!data.storeProduct) throw new Error("GraphQL did not return the requested owned product.");
     return data.storeProduct;
   },
 
   async listProductTypes(): Promise<PlatformProductType[]> {
-    const data = await graphQl<StoreProductTypesQuery>(storeProductTypesDocument);
+    const data = await graphQl(StoreProductTypesDocument);
     return data.storeProductTypes;
   },
 
   async listProductAttributeValues(productId: string): Promise<PlatformAttributeValue[]> {
-    const data = await graphQl<StoreProductAttributeValuesQuery, StoreProductAttributeValuesQueryVariables>(
-      storeProductAttributeValuesDocument,
-      { productId },
-    );
+    const data = await graphQl(StoreProductAttributeValuesDocument, { productId });
     return data.storeProductAttributeValues;
   },
 
@@ -167,26 +142,17 @@ export const marketplaceApi = {
     id: string,
     values: PlatformAttributeValueInput[],
   ): Promise<PlatformAttributeValue[]> {
-    const data = await graphQl<
-      ReplaceStoreProductAttributesMutation,
-      ReplaceStoreProductAttributesMutationVariables
-    >(replaceStoreProductAttributesDocument, { id, values });
+    const data = await graphQl(ReplaceStoreProductAttributesDocument, { id, values });
     return data.replaceStoreProductAttributes;
   },
 
   async listProductVariants(productId: string): Promise<PlatformProductVariant[]> {
-    const data = await graphQl<StoreProductVariantsQuery, StoreProductVariantsQueryVariables>(
-      storeProductVariantsDocument,
-      { productId },
-    );
+    const data = await graphQl(StoreProductVariantsDocument, { productId });
     return data.storeProductVariants;
   },
 
   async listVariantAttributeValues(variantId: string): Promise<PlatformAttributeValue[]> {
-    const data = await graphQl<
-      StoreProductVariantAttributeValuesQuery,
-      StoreProductVariantAttributeValuesQueryVariables
-    >(storeProductVariantAttributeValuesDocument, { variantId });
+    const data = await graphQl(StoreProductVariantAttributeValuesDocument, { variantId });
     return data.storeProductVariantAttributeValues;
   },
 
@@ -194,34 +160,22 @@ export const marketplaceApi = {
     productId: string,
     input: CreateProductVariantRequest,
   ): Promise<PlatformProductVariant> {
-    const data = await graphQl<
-      CreateStoreProductVariantMutation,
-      CreateStoreProductVariantMutationVariables
-    >(createStoreProductVariantDocument, { productId, input });
+    const data = await graphQl(CreateStoreProductVariantDocument, { productId, input });
     return data.createStoreProductVariant;
   },
 
   async createProduct(input: CreateProductRequest): Promise<PlatformProduct> {
-    const data = await graphQl<CreateStoreProductMutation, CreateStoreProductMutationVariables>(
-      createStoreProductDocument,
-      { input },
-    );
+    const data = await graphQl(CreateStoreProductDocument, { input });
     return data.createStoreProduct;
   },
 
   async updateProduct(id: string, input: UpdateProductRequest): Promise<PlatformProduct> {
-    const data = await graphQl<UpdateStoreProductMutation, UpdateStoreProductMutationVariables>(
-      updateStoreProductDocument,
-      { id, input },
-    );
+    const data = await graphQl(UpdateStoreProductDocument, { id, input });
     return data.updateStoreProduct;
   },
 
   async publishProduct(id: string): Promise<PlatformProduct> {
-    const data = await graphQl<PublishStoreProductMutation, PublishStoreProductMutationVariables>(
-      publishStoreProductDocument,
-      { id },
-    );
+    const data = await graphQl(PublishStoreProductDocument, { id });
     return data.publishStoreProduct;
   },
 };
