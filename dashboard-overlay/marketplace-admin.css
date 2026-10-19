@@ -63,3 +63,6 @@
 }
 
 .ma-alert__signin { display:inline-block; margin-left:8px; color:inherit; font-weight:800; text-decoration:underline; text-underline-offset:3px; }
+
+.marketplace-admin__header-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.marketplace-admin__header-actions a { text-decoration:none; }
