@@ -28,7 +28,8 @@ const emptyEditor: EditorValues = {
 
 function currencyFractionDigits(currency: string): number {
   try {
-    return new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions().maximumFractionDigits;
+    const digits = new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions().maximumFractionDigits;
+    return typeof digits === "number" ? digits : 2;
   } catch {
     return 2;
   }
