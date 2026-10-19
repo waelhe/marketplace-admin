@@ -218,7 +218,6 @@ export default defineConfig(({ command, mode }) => {
         "@assets": path.resolve(__dirname, "./assets"),
         "@locale": path.resolve(__dirname, "./locale"),
         "@dashboard": path.resolve(__dirname, "./src"),
-        "@platform-operations": path.resolve(__dirname, "./platform-operations"),
         src: path.resolve(__dirname, "./src"),
         // Force locally linked packages to use dashboard's React
         react: path.resolve(__dirname, "./node_modules/react"),
