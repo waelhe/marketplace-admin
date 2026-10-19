@@ -121,8 +121,9 @@ async function graphQlData<T>(
   response: APIResponse,
   diagnostic: string,
 ): Promise<T> {
-  const envelope = await response.json() as { data?: T; errors?: Array<{ message?: string }> };
-  expect(response.status(), `${diagnostic}: HTTP ${response.status()} ${await response.text()}`).toBe(200);
+  const rawBody = await response.text();
+  expect(response.status(), `${diagnostic}: HTTP ${response.status()} ${rawBody}`).toBe(200);
+  const envelope = JSON.parse(rawBody) as { data?: T; errors?: Array<{ message?: string }> };
   expect(envelope.errors, `${diagnostic} GraphQL errors: ${JSON.stringify(envelope.errors)}`).toBeUndefined();
   expect(envelope.data, `${diagnostic} returned no GraphQL data`).toBeDefined();
   return envelope.data as T;
