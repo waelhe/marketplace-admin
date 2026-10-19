@@ -15,7 +15,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const isApi = req.url?.startsWith("/api/") || req.url?.startsWith("/oauth2/") || req.url?.startsWith("/login");
+  const isApi = req.url?.startsWith("/api/") || req.url?.startsWith("/graphql") || req.url?.startsWith("/oauth2/") || req.url?.startsWith("/login");
   const base = isApi ? apiOrigin : dashboardOrigin;
   const target = new URL(req.url || "/", base);
   const headers = new Headers();
