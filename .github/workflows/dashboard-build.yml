@@ -13,8 +13,6 @@ on:
       - "codegen-platform.ts"
       - "scripts/sync-platform-graphql-schema.mjs"
       - "package.json"
-      - "tsconfig.json"
-      - "vite.config.js"
       - ".github/workflows/dashboard-build.yml"
       - "README.md"
   pull_request:
