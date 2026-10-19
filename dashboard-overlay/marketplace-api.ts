@@ -11,6 +11,10 @@ import {
   StoreProductVariantsDocument,
   UpdateStoreProductDocument,
 } from "./generated/platform-operations";
+import type {
+  StoreProductRosterQuery,
+  StoreProductRosterQueryVariables,
+} from "./generated/platform-operations";
 
 import { print } from "graphql";
 import type { TypedDocumentNode } from "@graphql-typed-document-node/core";
@@ -106,12 +110,15 @@ export const marketplaceApi = {
     const maxPages = 100;
 
     for (let page = 0; page < maxPages; page++) {
-      const data = await graphQl(StoreProductRosterDocument, { first: 50, after });
+      const data = await graphQl<StoreProductRosterQuery, StoreProductRosterQueryVariables>(
+        StoreProductRosterDocument,
+        { first: 50, after },
+      );
       const edges = data.storeProducts.edges ?? [];
       for (const edge of edges) {
         if (edge?.node) products.push(edge.node);
       }
-      const pageInfo = data.storeProducts.pageInfo;
+      const pageInfo: StoreProductRosterQuery["storeProducts"]["pageInfo"] = data.storeProducts.pageInfo;
       if (!pageInfo.hasNextPage) return products;
       if (!pageInfo.endCursor || pageInfo.endCursor === after) {
         throw new Error("GraphQL product pagination returned no advancing endCursor.");
