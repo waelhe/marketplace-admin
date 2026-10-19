@@ -3,8 +3,11 @@ import type { FormEvent } from "react";
 
 import {
   marketplaceApi,
+  type PlatformAttributeValue,
   type PlatformProduct,
   type PlatformProductType,
+  type PlatformProductTypeAttribute,
+  type PlatformProductVariant,
 } from "./marketplace-api";
 import "./marketplace-admin.css";
 
@@ -69,6 +72,82 @@ function formatPrice(minor: string, currency: string): string {
 const productTypeLabel = (type: PlatformProductType) =>
   type.nameEn || type.nameAr || type.code;
 
+function valuesToMap(values: PlatformAttributeValue[]): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const value of values) {
+    if (value.textValue != null) result[value.assignmentId] = value.textValue;
+    else if (value.numberValue != null) result[value.assignmentId] = value.numberValue;
+    else if (value.booleanValue != null) result[value.assignmentId] = String(value.booleanValue);
+    else if (value.optionId != null) result[value.assignmentId] = value.optionId;
+  }
+  return result;
+}
+
+function valuesFromMap(
+  attributes: PlatformProductTypeAttribute[],
+  values: Record<string, string>,
+): PlatformAttributeValue[] {
+  return attributes.flatMap(attribute => {
+    const value = values[attribute.assignmentId];
+    if (value === undefined || value === "") return [];
+    const base = { assignmentId: attribute.assignmentId };
+    switch (attribute.valueType) {
+      case "TEXT": return [{ ...base, textValue: value }];
+      case "NUMBER": return [{ ...base, numberValue: value }];
+      case "BOOLEAN": return [{ ...base, booleanValue: value === "true" }];
+      case "CHOICE": return [{ ...base, optionId: value }];
+    }
+  });
+}
+
+type TypedAttributeFieldsProps = {
+  attributes: PlatformProductTypeAttribute[];
+  values: Record<string, string>;
+  onChange: (assignmentId: string, value: string) => void;
+  testIdPrefix: string;
+};
+
+function TypedAttributeFields({ attributes, values, onChange, testIdPrefix }: TypedAttributeFieldsProps) {
+  if (attributes.length === 0) return null;
+  return (
+    <div className="ma-typed-fields">
+      {attributes.map(attribute => {
+        const label = attribute.nameEn || attribute.nameAr || attribute.code;
+        const fieldId = `${testIdPrefix}-attribute-${attribute.assignmentId}`;
+        const required = attribute.required || attribute.scope === "VARIANT_SELECTION";
+        return (
+          <label key={attribute.assignmentId}>
+            {label}{required ? " *" : ""}
+            {attribute.valueType === "CHOICE" ? (
+              <select data-testid={fieldId} value={values[attribute.assignmentId] || ""}
+                onChange={event => onChange(attribute.assignmentId, event.target.value)} required={required}>
+                <option value="">Choose {label.toLowerCase()}</option>
+                {attribute.options.map(option => (
+                  <option key={option.id} value={option.id}>{option.nameEn || option.nameAr || option.code}</option>
+                ))}
+              </select>
+            ) : attribute.valueType === "BOOLEAN" ? (
+              <select data-testid={fieldId} value={values[attribute.assignmentId] || ""}
+                onChange={event => onChange(attribute.assignmentId, event.target.value)} required={required}>
+                <option value="">Choose yes or no</option>
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+              </select>
+            ) : attribute.valueType === "NUMBER" ? (
+              <input data-testid={fieldId} type="number" step="any" value={values[attribute.assignmentId] || ""}
+                onChange={event => onChange(attribute.assignmentId, event.target.value)} required={required} />
+            ) : (
+              <input data-testid={fieldId} value={values[attribute.assignmentId] || ""}
+                onChange={event => onChange(attribute.assignmentId, event.target.value)}
+                required={required} maxLength={4000} />
+            )}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 function explainError(error: unknown): string {
   if (error instanceof Error) {
     if (error.message.startsWith("401")) {
@@ -92,12 +171,28 @@ export default function MarketplaceAdminApp() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [readBack, setReadBack] = useState<PlatformProduct | null>(null);
+  const [productAttributeValues, setProductAttributeValues] = useState<Record<string, string>>({});
+  const [variants, setVariants] = useState<PlatformProductVariant[]>([]);
+  const [variantAttributeValues, setVariantAttributeValues] = useState<Record<string, string>>({});
+  const [variantSku, setVariantSku] = useState("");
+  const [variantName, setVariantName] = useState("");
+  const [variantPrice, setVariantPrice] = useState("");
 
   const authenticationRequired = error?.includes("authenticated edge") ?? false;
 
   const selectedProductType = useMemo(
     () => productTypes.find(type => type.id === editor.productTypeId),
     [editor.productTypeId, productTypes],
+  );
+  const productAttributes = useMemo(
+    () => (selectedProductType?.attributes || []).filter(attribute => attribute.scope === "PRODUCT"),
+    [selectedProductType],
+  );
+  const variantAttributes = useMemo(
+    () => (selectedProductType?.attributes || []).filter(
+      attribute => attribute.scope === "VARIANT" || attribute.scope === "VARIANT_SELECTION",
+    ),
+    [selectedProductType],
   );
 
   const refresh = useCallback(async () => {
