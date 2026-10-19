@@ -1,0 +1,14 @@
+query StoreProductVariants($productId: ID!) {
+  storeProductVariants(productId: $productId) {
+    id
+    productId
+    sku
+    name
+    priceMinor
+    currency
+    providerId
+    status
+    stockQuantity
+    reservedQuantity
+  }
+}
