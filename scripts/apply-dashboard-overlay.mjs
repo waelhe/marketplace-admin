@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
 
@@ -85,8 +85,19 @@ if (!navigation.includes('id: "marketplace-admin"')) {
 const sourceDir = join(repoRoot, "dashboard-overlay");
 const targetDir = join(dashboardRoot, "src/marketplaceAdmin");
 await mkdir(targetDir, { recursive: true });
-for (const filename of ["MarketplaceAdminApp.tsx", "marketplace-api.ts", "marketplace-admin.css"]) {
-  await copyFile(join(sourceDir, filename), join(targetDir, filename));
+if (dashboardRoot === resolve(repoRoot)) {
+  // In the imported repository, dashboard-overlay is the single source of truth.
+  // Thin wrappers keep the full upstream working tree from drifting from the overlay.
+  await write("src/marketplaceAdmin/MarketplaceAdminApp.tsx",
+    'export { default } from "../../dashboard-overlay/MarketplaceAdminApp";\\n');
+  await write("src/marketplaceAdmin/marketplace-api.ts",
+    'export * from "../../dashboard-overlay/marketplace-api";\\n');
+  await rm(join(targetDir, "marketplace-admin.css"), { force: true });
+} else {
+  // For a clean upstream checkout, materialize the self-contained overlay in src.
+  for (const filename of ["MarketplaceAdminApp.tsx", "marketplace-api.ts", "marketplace-admin.css"]) {
+    await copyFile(join(sourceDir, filename), join(targetDir, filename));
+  }
 }
 
 const envSource = await readFile(join(sourceDir, "vite-env.d.ts"), "utf8");
