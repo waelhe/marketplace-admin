@@ -95,49 +95,54 @@ if (pendingPr.state === "closed" && pendingPr.merged !== true) {
 
 const acceptedSdlUrl = `https://raw.githubusercontent.com/${repo}/${acceptedSha}/schema.graphqls`;
 const pendingSdlUrl = `https://raw.githubusercontent.com/${repo}/${pendingRef}/marketplace-app/src/main/resources/graphql/schema.graphqls`;
-const [acceptedText, pendingText] = await Promise.all([
-  fetchText(acceptedSdlUrl, "published runtime SDL"),
-  fetchText(pendingSdlUrl, "pending catalog SDL"),
-]);
+const acceptedTextPromise = fetchText(acceptedSdlUrl, "published runtime SDL");
+const pendingTextPromise = pendingPr.merged === true
+  ? Promise.resolve(null)
+  : fetchText(pendingSdlUrl, "pending catalog SDL");
+const [acceptedText, pendingText] = await Promise.all([acceptedTextPromise, pendingTextPromise]);
 
 let accepted = parse(acceptedText);
-const pending = parse(pendingText);
-const pendingQuery = objectDefinition(pending, "Query");
-const pendingMutation = objectDefinition(pending, "Mutation");
-if (!pendingQuery || !pendingMutation) {
-  throw new Error("Pending catalog SDL does not define both Query and Mutation");
-}
+if (pendingPr.merged !== true) {
+  if (pendingText == null) throw new Error("Pending catalog SDL was not retrieved before merge.");
+  const pending = parse(pendingText);
+  const pendingQuery = objectDefinition(pending, "Query");
+  const pendingMutation = objectDefinition(pending, "Mutation");
+  if (!pendingQuery || !pendingMutation) {
+    throw new Error("Pending catalog SDL does not define both Query and Mutation");
+  }
 
-accepted = addFields(accepted, "Query", pendingQuery.fields ?? [], name => name.startsWith("storeProduct"));
-accepted = addFields(accepted, "Mutation", pendingMutation.fields ?? [], name =>
-  /^(create|update|publish|replace)StoreProduct/.test(name),
-);
+  accepted = addFields(accepted, "Query", pendingQuery.fields ?? [], name => name.startsWith("storeProduct"));
+  accepted = addFields(accepted, "Mutation", pendingMutation.fields ?? [], name =>
+    /^(create|update|publish|replace)StoreProduct/.test(name),
+  );
 
-const existingNames = new Set(accepted.definitions.map(named).filter(Boolean));
-const catalogDefinitions = pending.definitions.filter(definition => {
-  const name = named(definition);
-  return name?.startsWith("StoreProduct") && !existingNames.has(name);
-});
-accepted = { ...accepted, definitions: [...accepted.definitions, ...catalogDefinitions] };
-
-const afterTypeNames = new Set(accepted.definitions.map(named).filter(Boolean));
-if (!afterTypeNames.has("StoreProductConnection")) {
-  const connection = cloneConnectionType(accepted, "ServiceConnection", "StoreProductConnection", {
-    ServiceEdge: "StoreProductEdge",
+  const existingNames = new Set(accepted.definitions.map(named).filter(Boolean));
+  const catalogDefinitions = pending.definitions.filter(definition => {
+    const name = named(definition);
+    return name?.startsWith("StoreProduct") && !existingNames.has(name);
   });
-  accepted = { ...accepted, definitions: [...accepted.definitions, connection] };
-}
-const withConnectionNames = new Set(accepted.definitions.map(named).filter(Boolean));
-if (!withConnectionNames.has("StoreProductEdge")) {
-  const edge = cloneConnectionType(accepted, "ServiceEdge", "StoreProductEdge", {
-    Service: "StoreProduct",
-  });
-  accepted = { ...accepted, definitions: [...accepted.definitions, edge] };
-}
+  accepted = { ...accepted, definitions: [...accepted.definitions, ...catalogDefinitions] };
 
+  // Until the backend change is published, derive the generated connection and edge shapes
+  // from the already-published Spring runtime schema. They are not maintained by hand.
+  const afterTypeNames = new Set(accepted.definitions.map(named).filter(Boolean));
+  if (!afterTypeNames.has("StoreProductConnection")) {
+    const connection = cloneConnectionType(accepted, "ServiceConnection", "StoreProductConnection", {
+      ServiceEdge: "StoreProductEdge",
+    });
+    accepted = { ...accepted, definitions: [...accepted.definitions, connection] };
+  }
+  const withConnectionNames = new Set(accepted.definitions.map(named).filter(Boolean));
+  if (!withConnectionNames.has("StoreProductEdge")) {
+    const edge = cloneConnectionType(accepted, "ServiceEdge", "StoreProductEdge", {
+      Service: "StoreProduct",
+    });
+    accepted = { ...accepted, definitions: [...accepted.definitions, edge] };
+  }
+}
 const generated = `# GENERATED FILE — do not edit.
 # Accepted runtime source: ${acceptedSdlUrl}
-# Pending catalog contract source (temporary until backend PR #666 is merged): ${pendingSdlUrl}
+# Catalog schema source: ${pendingPr.merged === true ? "published runtime SDL (backend PR #666 merged)" : pendingSdlUrl}
 # Regenerate with: pnpm run generate:platform
 
 ${print(accepted)}
@@ -156,4 +161,4 @@ await writeFile(
   }, null, 2)}\n`,
   "utf8",
 );
-console.log(`Assembled platform GraphQL SDL from runtime commit ${acceptedSha} and catalog PR #666 head ${pendingRef}.`);
+console.log(`Assembled platform GraphQL SDL from runtime commit ${acceptedSha}${pendingPr.merged === true ? " (catalog contract is published)" : ` plus catalog PR #666 head ${pendingRef}`}.`);
