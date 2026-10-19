@@ -87,17 +87,27 @@ function valuesFromMap(
   attributes: PlatformProductTypeAttribute[],
   values: Record<string, string>,
 ): PlatformAttributeValue[] {
-  return attributes.flatMap(attribute => {
+  const result: PlatformAttributeValue[] = [];
+  for (const attribute of attributes) {
     const value = values[attribute.assignmentId];
-    if (value === undefined || value === "") return [];
+    if (value === undefined || value === "") continue;
     const base = { assignmentId: attribute.assignmentId };
     switch (attribute.valueType) {
-      case "TEXT": return [{ ...base, textValue: value }];
-      case "NUMBER": return [{ ...base, numberValue: value }];
-      case "BOOLEAN": return [{ ...base, booleanValue: value === "true" }];
-      case "CHOICE": return [{ ...base, optionId: value }];
+      case "TEXT":
+        result.push({ ...base, textValue: value });
+        break;
+      case "NUMBER":
+        result.push({ ...base, numberValue: value });
+        break;
+      case "BOOLEAN":
+        result.push({ ...base, booleanValue: value === "true" });
+        break;
+      case "CHOICE":
+        result.push({ ...base, optionId: value });
+        break;
     }
-  });
+  }
+  return result;
 }
 
 type TypedAttributeFieldsProps = {
