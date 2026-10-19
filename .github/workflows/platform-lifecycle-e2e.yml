@@ -1,0 +1,152 @@
+name: Marketplace Admin — Spring REST lifecycle E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-admin-spring-e2e
+  cancel-in-progress: false
+
+jobs:
+  product-lifecycle:
+    name: Browser create → edit → publish → API read-back
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Configure this protected environment with a dedicated non-production backend.
+    environment: marketplace-e2e
+    env:
+      MARKETPLACE_E2E_API_ORIGIN: ${{ vars.MARKETPLACE_E2E_API_ORIGIN }}
+      MARKETPLACE_E2E_CLIENT_ID: ${{ vars.MARKETPLACE_E2E_CLIENT_ID }}
+      MARKETPLACE_E2E_CLIENT_SECRET: ${{ secrets.MARKETPLACE_E2E_CLIENT_SECRET }}
+      MARKETPLACE_E2E_USERNAME: ${{ secrets.MARKETPLACE_E2E_USERNAME }}
+      MARKETPLACE_E2E_PASSWORD: ${{ secrets.MARKETPLACE_E2E_PASSWORD }}
+      MARKETPLACE_E2E_REDIRECT_URI: ${{ vars.MARKETPLACE_E2E_REDIRECT_URI }}
+      MARKETPLACE_E2E_STORE_CATEGORY_CODE: ${{ vars.MARKETPLACE_E2E_STORE_CATEGORY_CODE }}
+      MARKETPLACE_E2E_PRODUCT_TYPE_ID: ${{ vars.MARKETPLACE_E2E_PRODUCT_TYPE_ID }}
+      MARKETPLACE_E2E_TARGET_APPROVED: ${{ vars.MARKETPLACE_E2E_TARGET_APPROVED }}
+      MARKETPLACE_PRODUCTION_API_ORIGIN: ${{ vars.MARKETPLACE_PRODUCTION_API_ORIGIN }}
+      MARKETPLACE_ADMIN_BROWSER_URL: http://127.0.0.1:4180
+      MARKETPLACE_ADMIN_PREVIEW_ORIGIN: http://127.0.0.1:4173
+      MARKETPLACE_ADMIN_PROXY_PORT: "4180"
+    steps:
+      - name: Checkout overlay repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Checkout exact upstream Dashboard release
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: saleor/saleor-dashboard
+          ref: bc75e988da0fa4fbc3d47378a888d859d070746f
+          path: dashboard
+          persist-credentials: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v6.1.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: dashboard/pnpm-lock.yaml
+
+      - name: Set up pinned pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 11.13.1
+          run_install: false
+
+      - name: Validate dedicated test target and credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$MARKETPLACE_E2E_TARGET_APPROVED" = "yes" || {
+            echo "::error::Set marketplace-e2e environment variable MARKETPLACE_E2E_TARGET_APPROVED=yes only after verifying the target is a dedicated non-production test backend."
+            exit 1
+          }
+          test -n "$MARKETPLACE_E2E_API_ORIGIN"
+          test -n "$MARKETPLACE_E2E_CLIENT_ID"
+          test -n "$MARKETPLACE_E2E_CLIENT_SECRET"
+          test -n "$MARKETPLACE_E2E_USERNAME"
+          test -n "$MARKETPLACE_E2E_PASSWORD"
+          test -n "$MARKETPLACE_E2E_STORE_CATEGORY_CODE"
+          test -n "$MARKETPLACE_E2E_PRODUCT_TYPE_ID"
+          node --input-type=module -e '
+            const api = new URL(process.env.MARKETPLACE_E2E_API_ORIGIN);
+            if (!["http:", "https:"].includes(api.protocol) || api.pathname !== "/" || api.search || api.hash) {
+              throw new Error("MARKETPLACE_E2E_API_ORIGIN must be a backend origin only, with no path/query/hash");
+            }
+            if (process.env.MARKETPLACE_PRODUCTION_API_ORIGIN) {
+              const production = new URL(process.env.MARKETPLACE_PRODUCTION_API_ORIGIN);
+              if (api.origin === production.origin) throw new Error("Refusing mutating E2E tests against the configured production API origin.");
+            }
+            console.log("E2E target syntax and production-origin guard passed.");
+          '
+
+      - name: Apply platform overlay and verify upstream identity
+        run: node scripts/apply-dashboard-overlay.mjs dashboard
+
+      - name: Install Dashboard dependencies from lockfile
+        working-directory: dashboard
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium for Playwright
+        working-directory: dashboard
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build E2E-only Dashboard mode
+        working-directory: dashboard
+        env:
+          CI: "true"
+          VITE_MARKETPLACE_ADMIN_MODE: "true"
+          VITE_MARKETPLACE_E2E_MODE: "true"
+          VITE_MARKETPLACE_E2E_PRODUCT_TYPE_ID: ${{ vars.MARKETPLACE_E2E_PRODUCT_TYPE_ID }}
+        run: pnpm run build
+
+      - name: Start Dashboard preview
+        working-directory: dashboard
+        run: |
+          pnpm run preview -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/marketplace-admin-preview.log 2>&1 &
+          echo $! > /tmp/marketplace-admin-preview.pid
+          for i in $(seq 1 40); do
+            if curl --silent --fail http://127.0.0.1:4173/ > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/marketplace-admin-preview.log
+          exit 1
+
+      - name: Start same-origin proxy to dedicated Spring backend
+        run: |
+          node scripts/e2e-proxy.mjs > /tmp/marketplace-admin-proxy.log 2>&1 &
+          echo $! > /tmp/marketplace-admin-proxy.pid
+          for i in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:4180/__health > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/marketplace-admin-proxy.log
+          exit 1
+
+      - name: Run browser-based Spring REST lifecycle
+        working-directory: dashboard
+        env:
+          CI: "true"
+        run: pnpm exec playwright test --config e2e-marketplace-admin/playwright.config.ts
+
+      - name: Stop preview and proxy
+        if: always()
+        run: |
+          if test -f /tmp/marketplace-admin-preview.pid; then kill "$(cat /tmp/marketplace-admin-preview.pid)" || true; fi
+          if test -f /tmp/marketplace-admin-proxy.pid; then kill "$(cat /tmp/marketplace-admin-proxy.pid)" || true; fi
+
+      - name: Upload Playwright evidence and service logs
+        if: always()
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: marketplace-admin-spring-playwright-report
+          path: |
+            dashboard/e2e-marketplace-admin/playwright-report-marketplace-admin/
+            dashboard/test-results/
+            /tmp/marketplace-admin-preview.log
+            /tmp/marketplace-admin-proxy.log
+          if-no-files-found: warn
+          retention-days: 14
