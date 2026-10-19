@@ -48,14 +48,24 @@ const renderStart = entry.lastIndexOf("\nroot.render(");
 requireShape(renderStart >= 0, "could not locate the terminal React root.render call");
 const normalRender = entry.slice(renderStart + 1);
 requireShape(normalRender.includes("<StrictMode>") && normalRender.includes("<App />"), "the upstream render body changed");
-const overlayRender = `const marketplaceAdminPath = window.location.pathname.replace(/\\/+$/, "") === "/marketplace-admin";
+const overlayRender = `const marketplaceAdminMode = import.meta.env.VITE_MARKETPLACE_ADMIN_MODE === "true";
+const marketplaceAdminPath = window.location.pathname.replace(/\\/+$/, "") === "/marketplace-admin";
 const marketplaceOAuthCallbackPath = window.location.pathname === "/oauth/callback";
 
-if (import.meta.env.VITE_MARKETPLACE_ADMIN_MODE === "true" && marketplaceAdminPath) {
+if (marketplaceAdminMode && marketplaceAdminPath) {
   root.render(<MarketplaceAdminApp />);
-} else if (import.meta.env.VITE_MARKETPLACE_ADMIN_MODE === "true" && marketplaceOAuthCallbackPath) {
-  // Keep the Authorization Code callback on the same origin without mounting Saleor's GraphQL app.
+} else if (marketplaceAdminMode && marketplaceOAuthCallbackPath) {
+  // Keep the Authorization Code callback on the same origin without mounting the Saleor GraphQL app.
   root.render(<div data-testid="marketplace-oauth-callback-sink" />);
+} else if (marketplaceAdminMode) {
+  // Do not expose unadapted Saleor pages in the platform administration build.
+  root.render(
+    <main data-testid="marketplace-admin-unavailable">
+      <h1>Marketplace administration</h1>
+      <p>This route is not yet integrated with the platform backend.</p>
+      <a href="/marketplace-admin">Open supported catalog</a>
+    </main>,
+  );
 } else {
 ${normalRender.split("\n").map(line => `  ${line}`).join("\n")}
 }`;
