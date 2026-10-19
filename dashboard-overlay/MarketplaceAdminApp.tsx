@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 
 import {
   marketplaceApi,
@@ -109,7 +110,7 @@ export default function MarketplaceAdminApp() {
     document.getElementById("platform-product-editor")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const saveDraftOrChanges = async (event: React.FormEvent<HTMLFormElement>) => {
+  const saveDraftOrChanges = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaving(true);
     setError(null);
