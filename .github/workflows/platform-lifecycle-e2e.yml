@@ -2,6 +2,16 @@ name: Marketplace Admin — Spring GraphQL lifecycle E2E
 
 on:
   workflow_dispatch:
+  # The workflow is not dispatchable until it exists on the default branch.
+  # Before merge, a deliberate PR label can request the same protected-environment gate.
+  pull_request:
+    types: [labeled]
+    paths:
+      - ".github/workflows/platform-lifecycle-e2e.yml"
+      - "dashboard-overlay/**"
+      - "platform-e2e/**"
+      - "platform-operations/**"
+      - "scripts/e2e-proxy.mjs"
 
 permissions:
   contents: read
@@ -12,6 +22,10 @@ concurrency:
 
 jobs:
   product-lifecycle:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'run-spring-e2e'))
     name: Browser create → edit → publish → GraphQL read-back
     runs-on: ubuntu-latest
     timeout-minutes: 25
