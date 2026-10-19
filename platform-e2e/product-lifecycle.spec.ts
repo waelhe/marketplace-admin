@@ -117,7 +117,7 @@ test("product lifecycle is created, edited, published and read back from Spring"
   });
   expect(apiProducts.status(), await apiProducts.text()).toBe(200);
 
-  await page.goto("/");
+  await page.goto("/marketplace-admin");
   await expect(page.getByRole("heading", { name: "Marketplace catalog" })).toBeVisible();
   await expect(page.getByTestId("product-editor")).toBeVisible();
 
