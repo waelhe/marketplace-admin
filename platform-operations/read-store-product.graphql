@@ -1,0 +1,13 @@
+query ReadStoreProduct($id: ID!) {
+  storeProduct(id: $id) {
+    id
+    storeCategoryCode
+    title
+    description
+    priceMinor
+    currency
+    providerId
+    productTypeId
+    status
+  }
+}
