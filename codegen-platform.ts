@@ -13,7 +13,7 @@ const config: CodegenConfig = {
   documents: ["./platform-operations/**/*.graphql"],
   generates: {
     [output]: {
-      plugins: ["typescript", "typescript-operations"],
+      plugins: ["typescript", "typescript-operations", "typed-document-node"],
       config: {
         useTypeImports: true,
         avoidOptionals: false,
