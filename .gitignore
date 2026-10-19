@@ -70,3 +70,8 @@ playwright-failures*/
 /build-e2e-*/
 /e2e/.cache/
 /e2e/test-results/
+
+# Generated from the CI-published runtime SDL and validated operation documents.
+/platform-contracts/generated-schema.graphqls
+/platform-contracts/.manifest.json
+/dashboard-overlay/generated/
