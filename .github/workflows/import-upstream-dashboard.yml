@@ -1,0 +1,117 @@
+name: Import pinned Saleor Dashboard source
+
+on:
+  push:
+    branches:
+      - feat/spring-rest-dashboard-bridge
+    paths:
+      - ".github/workflows/import-upstream-dashboard.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: import-saleor-dashboard-3-23-39
+  cancel-in-progress: false
+
+jobs:
+  import-pinned-dashboard:
+    name: Import complete pinned source snapshot and build it
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout platform overlay branch
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Checkout exact Saleor Dashboard source
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: saleor/saleor-dashboard
+          ref: bc75e988da0fa4fbc3d47378a888d859d070746f
+          path: dashboard-upstream
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Import upstream source into the independent repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Importing saleor/saleor-dashboard@bc75e988da0fa4fbc3d47378a888d859d070746f"
+          test "$(node -p "require('./dashboard-upstream/package.json').version")" = "3.23.39"
+
+          # The integration contract is kept in a separate file. The root README becomes
+          # the upstream Dashboard README with a small pointer to our platform-specific docs.
+          rsync -a dashboard-upstream/ ./ \
+            --exclude='.git/' \
+            --exclude='.github/workflows/dashboard-build.yml' \
+            --exclude='.github/workflows/platform-lifecycle-e2e.yml' \
+            --exclude='.github/workflows/import-upstream-dashboard.yml' \
+            --exclude='scripts/apply-dashboard-overlay.mjs' \
+            --exclude='scripts/e2e-proxy.mjs'
+
+          printf '%s\n' 'bc75e988da0fa4fbc3d47378a888d859d070746f' > .platform-upstream-commit
+          cat >> README.md <<'EOF'
+
+          ---
+
+          ## Platform integration
+
+          This downstream copy is pinned to Saleor Dashboard 3.23.39. Platform-specific REST contracts,
+          OAuth/BFF boundaries and acceptance evidence are documented in [PLATFORM_INTEGRATION.md](./PLATFORM_INTEGRATION.md).
+          See the dedicated workflows for the pinned build and the Spring REST Playwright lifecycle.
+          EOF
+
+          node scripts/apply-dashboard-overlay.mjs .
+          rm -rf dashboard-upstream
+
+      - name: Commit imported source snapshot and platform overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No source import changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: import Saleor Dashboard 3.23.39 with platform REST bridge"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v6.1.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Set up pinned pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 11.13.1
+          run_install: false
+
+      - name: Install upstream dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check imported source plus platform overlay
+        run: pnpm run check-types:src
+
+      - name: Build imported Dashboard-derived admin
+        env:
+          CI: "true"
+          VITE_MARKETPLACE_ADMIN_MODE: "true"
+        run: pnpm run build
+
+      - name: Upload build evidence
+        if: always() && hashFiles('dist/**') != ''
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: marketplace-admin-imported-dashboard-dist
+          path: dist/
+          if-no-files-found: warn
+          retention-days: 7
