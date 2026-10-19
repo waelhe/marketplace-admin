@@ -287,7 +287,7 @@ export const marketplaceApi = {
       mutation PublishStoreProduct($id: ID!) {
         publishStoreProduct(id: $id) { ${productFields} }
       }
-    `);
+    `, { id });
     return data.publishStoreProduct;
   },
 };
