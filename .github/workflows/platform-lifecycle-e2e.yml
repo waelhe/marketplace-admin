@@ -92,6 +92,12 @@ jobs:
         working-directory: dashboard
         run: pnpm install --frozen-lockfile
 
+      - name: Assemble runtime SDL and generate platform operation types
+        working-directory: dashboard
+        run: |
+          node scripts/sync-platform-graphql-schema.mjs
+          pnpm exec graphql-codegen --config codegen-platform.ts
+
       - name: Install Chromium for Playwright
         working-directory: dashboard
         run: pnpm exec playwright install --with-deps chromium
