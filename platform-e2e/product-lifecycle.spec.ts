@@ -297,9 +297,7 @@ test("GraphQL-backed typed catalog lifecycle works in the actual Dashboard", asy
   const variantValues = await graphQlData<{
     storeProductVariantAttributeValues: Array<{ assignmentId: string }>;
   }>(variantValuesResponse, "variant attribute read-back");
-  expect(variantValues.storeProductVariantAttributeValues.length).toBe(variantAttributes.filter(
-    attribute => attribute.required || attribute.scope === "VARIANT_SELECTION",
-  ).length);
+  expect(variantValues.storeProductVariantAttributeValues.length).toBe(variantAttributes.length);
 
   await page.getByTestId("product-title").fill(editedTitle);
   await page.getByTestId("product-description").fill("Updated description saved through GraphQL.");
