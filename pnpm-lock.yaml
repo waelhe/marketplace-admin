@@ -285,6 +285,12 @@ importers:
       "@graphql-codegen/typescript-operations":
         specifier: 4.6.1
         version: 4.6.1(graphql@16.11.0)
+      "@graphql-codegen/typed-document-node":
+        specifier: 5.1.2
+        version: 5.1.2(graphql@16.11.0)
+      "@graphql-typed-document-node/core":
+        specifier: 3.2.0
+        version: 3.2.0(graphql@16.11.0)
       "@graphql-codegen/typescript-react-apollo":
         specifier: 4.0.0
         version: 4.0.0(graphql-tag@2.12.6(graphql@16.11.0))(graphql@16.11.0)
