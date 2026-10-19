@@ -40,9 +40,6 @@
       ],
       "@mizdra/graphql-codegen-typescript-fabbrica/helper": [
         "node_modules/@mizdra/graphql-codegen-typescript-fabbrica/dist/esm/helper/index"
-      ],
-      "@platform-operations/*": [
-        "platform-operations/*"
       ]
     }
   },
