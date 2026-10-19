@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
 
@@ -93,6 +93,34 @@ if (!navigation.includes('id: "marketplace-admin"')) {
 }
 
 const sourceDir = join(repoRoot, "dashboard-overlay");
+// Keep GraphQL operation documents and schema generation sourced from this repository.
+const operationsTarget = join(dashboardRoot, "platform-operations");
+await rm(operationsTarget, { recursive: true, force: true });
+await cp(join(repoRoot, "platform-operations"), operationsTarget, { recursive: true });
+await copyFile(join(repoRoot, ".platform-graphql-contract-ref"), join(dashboardRoot, ".platform-graphql-contract-ref"));
+await copyFile(join(repoRoot, "codegen-platform.ts"), join(dashboardRoot, "codegen-platform.ts"));
+await copyFile(join(repoRoot, "scripts/sync-platform-graphql-schema.mjs"),
+  join(dashboardRoot, "scripts/sync-platform-graphql-schema.mjs"));
+
+const dashboardTsconfigPath = join(dashboardRoot, "tsconfig.json");
+const dashboardTsconfig = JSON.parse(await readFile(dashboardTsconfigPath, "utf8"));
+dashboardTsconfig.compilerOptions ??= {};
+dashboardTsconfig.compilerOptions.paths ??= {};
+dashboardTsconfig.compilerOptions.paths["@platform-operations/*"] = ["platform-operations/*"];
+await writeFile(dashboardTsconfigPath, `${JSON.stringify(dashboardTsconfig, null, 2)}\n`, "utf8");
+
+const viteConfigPath = join(dashboardRoot, "vite.config.js");
+let viteConfig = await readFile(viteConfigPath, "utf8");
+const viteAliasAnchor = '"@dashboard": path.resolve(__dirname, "./src"),';
+if (!viteConfig.includes(viteAliasAnchor)) {
+  throw new Error("Dashboard overlay refused to apply: the pinned Vite alias structure changed");
+}
+if (!viteConfig.includes('"@platform-operations":')) {
+  viteConfig = viteConfig.replace(viteAliasAnchor,
+    viteAliasAnchor + '\n        "@platform-operations": path.resolve(__dirname, "./platform-operations"),');
+  await writeFile(viteConfigPath, viteConfig, "utf8");
+}
+
 const targetDir = join(dashboardRoot, "src/marketplaceAdmin");
 await mkdir(targetDir, { recursive: true });
 if (dashboardRoot === resolve(repoRoot)) {
