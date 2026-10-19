@@ -88,10 +88,9 @@ jobs:
           git commit -m "chore: import Saleor Dashboard 3.23.39 with platform REST bridge"
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
-      - name: Set up pinned pnpm
+      - name: Set up pinned pnpm from packageManager
         uses: pnpm/action-setup@v5
         with:
-          version: 11.13.1
           run_install: false
 
       - name: Set up Node.js 24
