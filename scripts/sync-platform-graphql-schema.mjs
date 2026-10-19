@@ -94,16 +94,35 @@ if (pendingPr.state === "closed" && pendingPr.merged !== true) {
 }
 
 const acceptedSdlUrl = `https://raw.githubusercontent.com/${repo}/${acceptedSha}/schema.graphqls`;
+const catalogSourceSha = pendingPr.merged === true ? pendingPr.merge_commit_sha : pendingRef;
+if (!/^[0-9a-f]{40}$/.test(catalogSourceSha ?? "")) {
+  throw new Error("GitHub did not return an immutable catalog SDL source SHA");
+}
 const pendingSdlUrl = `https://raw.githubusercontent.com/${repo}/${pendingRef}/marketplace-app/src/main/resources/graphql/schema.graphqls`;
+const catalogSdlUrl = `https://raw.githubusercontent.com/${repo}/${catalogSourceSha}/marketplace-app/src/main/resources/graphql/schema.graphqls`;
 const acceptedTextPromise = fetchText(acceptedSdlUrl, "published runtime SDL");
-const pendingTextPromise = pendingPr.merged === true
-  ? Promise.resolve(null)
-  : fetchText(pendingSdlUrl, "pending catalog SDL");
-const [acceptedText, pendingText] = await Promise.all([acceptedTextPromise, pendingTextPromise]);
+const catalogTextPromise = fetchText(
+  catalogSdlUrl,
+  pendingPr.merged === true ? "merged catalog SDL" : "pending catalog SDL",
+);
+const [acceptedText, catalogText] = await Promise.all([acceptedTextPromise, catalogTextPromise]);
 
 let accepted = parse(acceptedText);
-if (pendingPr.merged !== true) {
-  if (pendingText == null) throw new Error("Pending catalog SDL was not retrieved before merge.");
+const runtimeQuery = objectDefinition(accepted, "Query");
+const runtimeMutation = objectDefinition(accepted, "Mutation");
+const runtimeHasCatalog = Boolean(
+  runtimeQuery?.fields?.some(field => field.name.value === "storeProducts") &&
+  runtimeQuery?.fields?.some(field => field.name.value === "storeProductTypes") &&
+  runtimeMutation?.fields?.some(field => field.name.value === "publishStoreProduct") &&
+  objectDefinition(accepted, "StoreProduct") &&
+  objectDefinition(accepted, "StoreProductConnection") &&
+  objectDefinition(accepted, "StoreProductEdge")
+);
+// If the merge completed before the contract-publishing workflow, compose from the exact merge
+// commit until the runtime schema artifact catches up. No branch SHA or schema path is hand-pinned.
+const needsCatalogOverlay = pendingPr.merged !== true || !runtimeHasCatalog;
+if (needsCatalogOverlay) {
+  const pending = parse(catalogText);
   const pending = parse(pendingText);
   const pendingQuery = objectDefinition(pending, "Query");
   const pendingMutation = objectDefinition(pending, "Mutation");
@@ -142,7 +161,7 @@ if (pendingPr.merged !== true) {
 }
 const generated = `# GENERATED FILE — do not edit.
 # Accepted runtime source: ${acceptedSdlUrl}
-# Catalog schema source: ${pendingPr.merged === true ? "published runtime SDL (backend PR #666 merged)" : pendingSdlUrl}
+# Catalog schema source: ${needsCatalogOverlay ? catalogSdlUrl : acceptedSdlUrl}
 # Regenerate with: pnpm run generate:platform
 
 ${print(accepted)}
@@ -155,10 +174,11 @@ await writeFile(
     generated: true,
     acceptedRuntimeCommit: acceptedSha,
     acceptedRuntimeUrl: acceptedSdlUrl,
-    pendingCatalogCommit: pendingRef,
-    pendingCatalogUrl: pendingSdlUrl,
+    catalogSourceCommit: catalogSourceSha,
+    catalogSourceUrl: catalogSdlUrl,
     pendingCatalogOverrideRequiredUntilMerged: pendingPr.merged !== true,
+    runtimeSchemaPublishLag: pendingPr.merged === true && needsCatalogOverlay,
   }, null, 2)}\n`,
   "utf8",
 );
-console.log(`Assembled platform GraphQL SDL from runtime commit ${acceptedSha}${pendingPr.merged === true ? " (catalog contract is published)" : ` plus catalog PR #666 head ${pendingRef}`}.`);
+console.log(`Assembled platform GraphQL SDL from runtime commit ${acceptedSha}${needsCatalogOverlay ? ` plus catalog commit ${catalogSourceSha}` : " (catalog contract is published)"}.`);
