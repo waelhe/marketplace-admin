@@ -61,3 +61,5 @@
   .ma-readback dl { grid-template-columns:1fr; gap:4px; }
   .ma-readback dd { margin-bottom:6px; }
 }
+
+.ma-alert__signin { display:inline-block; margin-left:8px; color:inherit; font-weight:800; text-decoration:underline; text-underline-offset:3px; }
