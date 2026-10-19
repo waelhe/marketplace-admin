@@ -94,7 +94,7 @@ const envPath = join(dashboardRoot, "src/vite-env.d.ts");
 let envTarget = await readFile(envPath, "utf8");
 if (!envTarget.includes("VITE_MARKETPLACE_ADMIN_MODE")) {
   envTarget += `\n\n// Types for the independently maintained platform-admin overlay.\n${envSource.replace(/^\/\/\/ <reference types="vite\/client" \/>\s*/m, "")}\n`;
-  await write(envPath, envTarget);
+  await write("src/vite-env.d.ts", envTarget);
 }
 
 const e2eDir = join(dashboardRoot, "e2e-marketplace-admin");
