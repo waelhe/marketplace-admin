@@ -89,9 +89,9 @@ if (dashboardRoot === resolve(repoRoot)) {
   // In the imported repository, dashboard-overlay is the single source of truth.
   // Thin wrappers keep the full upstream working tree from drifting from the overlay.
   await write("src/marketplaceAdmin/MarketplaceAdminApp.tsx",
-    'export { default } from "../../dashboard-overlay/MarketplaceAdminApp";\\n');
+    'export { default } from "../../dashboard-overlay/MarketplaceAdminApp";\n');
   await write("src/marketplaceAdmin/marketplace-api.ts",
-    'export * from "../../dashboard-overlay/marketplace-api";\\n');
+    'export * from "../../dashboard-overlay/marketplace-api";\n');
   await rm(join(targetDir, "marketplace-admin.css"), { force: true });
 } else {
   // For a clean upstream checkout, materialize the self-contained overlay in src.
