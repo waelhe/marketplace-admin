@@ -4,7 +4,11 @@
     "baseUrl": ".",
     "esModuleInterop": true,
     "jsx": "react-jsx",
-    "lib": ["es2020", "dom", "esnext"],
+    "lib": [
+      "es2020",
+      "dom",
+      "esnext"
+    ],
     "skipLibCheck": true,
     "sourceMap": true,
     "target": "ES2020",
@@ -19,15 +23,33 @@
       }
     ],
     "paths": {
-      "@assets/*": ["assets/*"],
-      "@locale/*": ["locale/*"],
-      "@dashboard/*": ["src/*"],
-      "@test/*": ["testUtils/*"],
-      "@storybookUtils/*": ["storybookUtils/*"],
+      "@assets/*": [
+        "assets/*"
+      ],
+      "@locale/*": [
+        "locale/*"
+      ],
+      "@dashboard/*": [
+        "src/*"
+      ],
+      "@test/*": [
+        "testUtils/*"
+      ],
+      "@storybookUtils/*": [
+        "storybookUtils/*"
+      ],
       "@mizdra/graphql-codegen-typescript-fabbrica/helper": [
         "node_modules/@mizdra/graphql-codegen-typescript-fabbrica/dist/esm/helper/index"
+      ],
+      "@platform-operations/*": [
+        "platform-operations/*"
       ]
     }
   },
-  "exclude": ["node_modules", "e2e", "e2e-legacy", "scripts"]
+  "exclude": [
+    "node_modules",
+    "e2e",
+    "e2e-legacy",
+    "scripts"
+  ]
 }
