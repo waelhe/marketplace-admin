@@ -71,6 +71,7 @@ jobs:
           test -n "$MARKETPLACE_E2E_PASSWORD"
           test -n "$MARKETPLACE_E2E_STORE_CATEGORY_CODE"
           test -n "$MARKETPLACE_E2E_PRODUCT_TYPE_ID"
+          test -n "$MARKETPLACE_E2E_REDIRECT_URI"
           test -n "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
             echo "::error::Set MARKETPLACE_PRODUCTION_API_ORIGIN so the workflow can refuse direct mutation of the production origin."
             exit 1
