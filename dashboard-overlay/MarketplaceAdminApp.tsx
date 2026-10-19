@@ -172,7 +172,6 @@ export default function MarketplaceAdminApp() {
           priceMinor,
           currency: editor.currency.trim().toUpperCase(),
           ...(editor.productTypeId ? { productTypeId: editor.productTypeId } : {}),
-          attributeValues: [],
         });
         setEditingId(created.id);
         setNotice(`Draft created: ${created.id}`);
