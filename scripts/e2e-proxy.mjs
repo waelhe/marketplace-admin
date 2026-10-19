@@ -2,7 +2,7 @@ import http from "node:http";
 
 const dashboardOrigin = new URL(process.env.MARKETPLACE_ADMIN_PREVIEW_ORIGIN || "http://127.0.0.1:4173");
 const apiOriginRaw = process.env.MARKETPLACE_E2E_API_ORIGIN;
-if (!apiOriginRaw) throw new Error("MARKETPLACE_E2E_API_ORIGIN is required; use a dedicated non-production test environment.");
+if (!apiOriginRaw) throw new Error("MARKETPLACE_E2E_API_ORIGIN is required; the protected E2E workflow sets it from MARKETPLACE_PRODUCTION_API_ORIGIN for the shared production/test backend.");
 const apiOrigin = new URL(apiOriginRaw);
 const browserOrigin = new URL(process.env.MARKETPLACE_ADMIN_BROWSER_URL || "http://127.0.0.1:4180");
 const port = Number(process.env.MARKETPLACE_ADMIN_PROXY_PORT || 4180);
