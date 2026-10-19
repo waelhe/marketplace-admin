@@ -48,8 +48,14 @@ const renderStart = entry.lastIndexOf("\nroot.render(");
 requireShape(renderStart >= 0, "could not locate the terminal React root.render call");
 const normalRender = entry.slice(renderStart + 1);
 requireShape(normalRender.includes("<StrictMode>") && normalRender.includes("<App />"), "the upstream render body changed");
-const overlayRender = `if (import.meta.env.VITE_MARKETPLACE_ADMIN_MODE === "true") {
+const overlayRender = `const marketplaceAdminPath = window.location.pathname.replace(/\\\/+$/, "") === "/marketplace-admin";
+const marketplaceOAuthCallbackPath = window.location.pathname === "/oauth/callback";
+
+if (import.meta.env.VITE_MARKETPLACE_ADMIN_MODE === "true" && marketplaceAdminPath) {
   root.render(<MarketplaceAdminApp />);
+} else if (import.meta.env.VITE_MARKETPLACE_ADMIN_MODE === "true" && marketplaceOAuthCallbackPath) {
+  // Keep the Authorization Code callback on the same origin without mounting Saleor's GraphQL app.
+  root.render(<div data-testid="marketplace-oauth-callback-sink" />);
 } else {
 ${normalRender.split("\n").map(line => `  ${line}`).join("\n")}
 }`;
