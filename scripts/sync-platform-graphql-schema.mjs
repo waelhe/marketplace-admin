@@ -1,11 +1,10 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { Kind, parse, print, visit } from "graphql";
 
 const repo = "waelhe/app-java-v3";
 const outputPath = resolve("platform-contracts/generated-schema.graphqls");
 const manifestPath = resolve("platform-contracts/.manifest.json");
-const refPath = resolve(".platform-graphql-contract-ref");
 
 async function fetchText(url, label) {
   const response = await fetch(url, {
@@ -71,15 +70,20 @@ function cloneConnectionType(document, sourceName, targetName, replacements) {
   });
 }
 
-const pendingRef = (await readFile(refPath, "utf8")).trim();
-if (!/^[0-9a-f]{40}$/.test(pendingRef)) {
-  throw new Error(`Expected a full immutable Git commit SHA in ${refPath}`);
-}
-
-const branch = await fetchJson(`https://api.github.com/repos/${repo}/branches/graphql-contract`, "published GraphQL contract branch");
+const [branch, pendingPr] = await Promise.all([
+  fetchJson(`https://api.github.com/repos/${repo}/branches/graphql-contract`, "published GraphQL contract branch"),
+  fetchJson(`https://api.github.com/repos/${repo}/pulls/666`, "pending catalog GraphQL contract PR"),
+]);
 const acceptedSha = branch.commit?.sha;
+const pendingRef = pendingPr.head?.sha;
 if (!/^[0-9a-f]{40}$/.test(acceptedSha ?? "")) {
   throw new Error("GitHub did not return an immutable commit SHA for graphql-contract");
+}
+if (!/^[0-9a-f]{40}$/.test(pendingRef ?? "")) {
+  throw new Error("GitHub did not return an immutable head SHA for catalog PR #666");
+}
+if (pendingPr.state === "closed" && pendingPr.merged !== true) {
+  throw new Error("Catalog PR #666 was closed without merging; refusing to generate from a rejected contract.");
 }
 
 const acceptedSdlUrl = `https://raw.githubusercontent.com/${repo}/${acceptedSha}/schema.graphqls`;
@@ -141,8 +145,8 @@ await writeFile(
     acceptedRuntimeUrl: acceptedSdlUrl,
     pendingCatalogCommit: pendingRef,
     pendingCatalogUrl: pendingSdlUrl,
-    pendingCatalogOverrideRequiredUntilMerged: true,
+    pendingCatalogOverrideRequiredUntilMerged: pendingPr.merged !== true,
   }, null, 2)}\n`,
   "utf8",
 );
-console.log(`Assembled platform GraphQL SDL from runtime commit ${acceptedSha} plus pinned catalog commit ${pendingRef}.`);
+console.log(`Assembled platform GraphQL SDL from runtime commit ${acceptedSha} and catalog PR #666 head ${pendingRef}.`);
