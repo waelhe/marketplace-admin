@@ -9,8 +9,15 @@ const manifestPath = resolve("platform-contracts/.manifest.json");
 async function fetchText(url, label) {
   const response = await fetch(url, {
     headers: {
-      accept: "application/vnd.github+json",
       "user-agent": "marketplace-admin-graphql-contract-sync",
+      ...(url.startsWith("https://api.github.com/")
+        ? {
+            accept: "application/vnd.github+json",
+            ...(process.env.GH_TOKEN || process.env.GITHUB_TOKEN
+              ? { authorization: `Bearer ${process.env.GH_TOKEN || process.env.GITHUB_TOKEN}` }
+              : {}),
+          }
+        : {}),
     },
   });
   if (!response.ok) {
@@ -90,7 +97,7 @@ const acceptedSdlUrl = `https://raw.githubusercontent.com/${repo}/${acceptedSha}
 const pendingSdlUrl = `https://raw.githubusercontent.com/${repo}/${pendingRef}/marketplace-app/src/main/resources/graphql/schema.graphqls`;
 const [acceptedText, pendingText] = await Promise.all([
   fetchText(acceptedSdlUrl, "published runtime SDL"),
-  fetchText(pendingSdlUrl, "pinned pending catalog SDL"),
+  fetchText(pendingSdlUrl, "pending catalog SDL"),
 ]);
 
 let accepted = parse(acceptedText);
