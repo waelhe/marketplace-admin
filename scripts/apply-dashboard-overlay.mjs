@@ -48,7 +48,7 @@ const renderStart = entry.lastIndexOf("\nroot.render(");
 requireShape(renderStart >= 0, "could not locate the terminal React root.render call");
 const normalRender = entry.slice(renderStart + 1);
 requireShape(normalRender.includes("<StrictMode>") && normalRender.includes("<App />"), "the upstream render body changed");
-const overlayRender = `const marketplaceAdminPath = window.location.pathname.replace(/\\\/+$/, "") === "/marketplace-admin";
+const overlayRender = `const marketplaceAdminPath = window.location.pathname.replace(/\\/+$/, "") === "/marketplace-admin";
 const marketplaceOAuthCallbackPath = window.location.pathname === "/oauth/callback";
 
 if (import.meta.env.VITE_MARKETPLACE_ADMIN_MODE === "true" && marketplaceAdminPath) {
@@ -64,7 +64,7 @@ await write(entryPath, entry);
 
 const navigationPath = "src/components/Sidebar/menu/hooks/useMenuStructure.tsx";
 let navigation = await read(navigationPath);
-const navigationAnchor = "  const menuItems: SidebarMenuItem[] = [\\n";
+const navigationAnchor = "  const menuItems: SidebarMenuItem[] = [\n";
 requireShape(navigation.includes(navigationAnchor), "the pinned sidebar menu structure marker changed");
 if (!navigation.includes('id: "marketplace-admin"')) {
   navigation = navigation.replace(
