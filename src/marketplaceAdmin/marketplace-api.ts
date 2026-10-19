@@ -13,9 +13,10 @@ export interface PlatformProduct {
   storeCategoryCode: string;
   title: string;
   description?: string | null;
-  priceMinor: number;
+  /** Exact base-10 integer string in the currency's minor unit. */
+  priceMinor: string;
   currency: string;
-  providerId?: string;
+  providerId: string;
   productTypeId?: string | null;
   status: PlatformProductStatus;
 }
@@ -24,71 +25,133 @@ export interface CreateProductRequest {
   storeCategoryCode: string;
   title: string;
   description?: string;
-  priceMinor: number;
+  /** Exact base-10 integer string in the currency's minor unit. */
+  priceMinor: string;
   currency: string;
   productTypeId?: string;
-  attributeValues: [];
 }
 
 export interface UpdateProductRequest {
   title: string;
   description?: string;
-  priceMinor: number;
+  /** Exact base-10 integer string in the currency's minor unit. */
+  priceMinor: string;
 }
+
+type GraphQlError = {
+  message: string;
+  extensions?: { code?: string; classification?: string };
+};
+
+type GraphQlEnvelope<T> = {
+  data?: T;
+  errors?: GraphQlError[];
+};
 
 declare global {
   interface Window {
-    /** Injected by Playwright only when VITE_MARKETPLACE_E2E_MODE=true. */
+    /** Injected only by the isolated Playwright build. Never persisted in storage. */
     __MARKETPLACE_E2E_ACCESS_TOKEN__?: string;
   }
 }
 
-const API_BASE = (import.meta.env.VITE_MARKETPLACE_API_BASE_URL || "/api/v1").replace(/\/$/, "");
+const GRAPHQL_URL = import.meta.env.VITE_MARKETPLACE_GRAPHQL_URL || "/graphql";
 const E2E_MODE = import.meta.env.VITE_MARKETPLACE_E2E_MODE === "true";
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  headers.set("Accept", "application/json");
-  if (init.body !== undefined) headers.set("Content-Type", "application/json");
+async function graphQl<T>(
+  query: string,
+  variables: Record<string, unknown> = {},
+): Promise<T> {
+  const headers = new Headers({ Accept: "application/json", "Content-Type": "application/json" });
 
   // Production deployment uses the authenticated edge/BFF and its server-side TokenRelay.
-  // A bearer token is accepted only in the isolated Playwright build; no token is persisted.
+  // A transient bearer is accepted only for a dedicated, isolated Playwright build.
   const testToken = E2E_MODE ? window.__MARKETPLACE_E2E_ACCESS_TOKEN__ : undefined;
   if (testToken) headers.set("Authorization", `Bearer ${testToken}`);
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
+  const response = await fetch(GRAPHQL_URL, {
+    method: "POST",
     headers,
     credentials: "same-origin",
+    body: JSON.stringify({ query, variables }),
   });
+
   if (!response.ok) {
-    let detail = "";
-    try {
-      const body: unknown = await response.json();
-      if (body && typeof body === "object") {
-        const record = body as Record<string, unknown>;
-        detail = String(record.detail ?? record.message ?? record.title ?? "");
-      }
-    } catch {
-      // Some error responses have no JSON body; keep the status diagnostic.
-    }
-    throw new Error(`${response.status} ${response.statusText}${detail ? `: ${detail}` : ""}`);
+    throw new Error(`${response.status} ${response.statusText}`);
   }
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+
+  const envelope = (await response.json()) as GraphQlEnvelope<T>;
+  if (envelope.errors?.length) {
+    throw new Error(envelope.errors.map(error => error.message).join("; "));
+  }
+  if (envelope.data === undefined) {
+    throw new Error("GraphQL returned neither data nor a classified error.");
+  }
+  return envelope.data;
 }
 
+const productFields = `
+  id storeCategoryCode title description priceMinor currency providerId productTypeId status
+`;
+
 export const marketplaceApi = {
-  listProducts: () => request<PlatformProduct[]>("/store/products"),
-  getProduct: (id: string) => request<PlatformProduct>(`/store/products/${encodeURIComponent(id)}`),
-  listProductTypes: () => request<PlatformProductType[]>("/store/product-types"),
-  createProduct: (body: CreateProductRequest) =>
-    request<PlatformProduct>("/store/products", { method: "POST", body: JSON.stringify(body) }),
-  updateProduct: (id: string, body: UpdateProductRequest) =>
-    request<PlatformProduct>(`/store/products/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    }),
-  publishProduct: (id: string) =>
-    request<PlatformProduct>(`/store/products/${encodeURIComponent(id)}/publish`, { method: "POST" }),
+  async listProducts(): Promise<PlatformProduct[]> {
+    const data = await graphQl<{
+      storeProducts: { edges: Array<{ node: PlatformProduct }> };
+    }>(`
+      query StoreProductRoster {
+        storeProducts(first: 50) {
+          edges { node { ${productFields} } }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    `);
+    return data.storeProducts.edges.map(edge => edge.node);
+  },
+
+  async getProduct(id: string): Promise<PlatformProduct> {
+    const data = await graphQl<{ storeProduct: PlatformProduct }>(`
+      query ReadStoreProduct($id: ID!) {
+        storeProduct(id: $id) { ${productFields} }
+      }
+    `, { id });
+    if (!data.storeProduct) throw new Error("GraphQL did not return the requested owned product.");
+    return data.storeProduct;
+  },
+
+  listProductTypes: async (): Promise<PlatformProductType[]> => {
+    const data = await graphQl<{ storeProductTypes: PlatformProductType[] }>(`
+      query StoreProductTypes {
+        storeProductTypes { id code nameEn nameAr description }
+      }
+    `);
+    return data.storeProductTypes;
+  },
+
+  createProduct: async (input: CreateProductRequest): Promise<PlatformProduct> => {
+    const data = await graphQl<{ createStoreProduct: PlatformProduct }>(`
+      mutation CreateStoreProduct($input: StoreProductCreateInput!) {
+        createStoreProduct(input: $input) { ${productFields} }
+      }
+    `, { input });
+    return data.createStoreProduct;
+  },
+
+  updateProduct: async (id: string, input: UpdateProductRequest): Promise<PlatformProduct> => {
+    const data = await graphQl<{ updateStoreProduct: PlatformProduct }>(`
+      mutation UpdateStoreProduct($id: ID!, $input: StoreProductUpdateInput!) {
+        updateStoreProduct(id: $id, input: $input) { ${productFields} }
+      }
+    `, { id, input });
+    return data.updateStoreProduct;
+  },
+
+  publishProduct: async (id: string): Promise<PlatformProduct> => {
+    const data = await graphQl<{ publishStoreProduct: PlatformProduct }>(`
+      mutation PublishStoreProduct($id: ID!) {
+        publishStoreProduct(id: $id) { ${productFields} }
+      }
+    `, { id });
+    return data.publishStoreProduct;
+  },
 };

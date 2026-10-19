@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { expect, test, type Page, type APIRequestContext } from "@playwright/test";
+import { expect, test, type Page, type APIRequestContext, type APIResponse } from "@playwright/test";
 
 const apiOrigin = requiredEnv("MARKETPLACE_E2E_API_ORIGIN").replace(/\/$/, "");
 const clientId = requiredEnv("MARKETPLACE_E2E_CLIENT_ID");
@@ -10,6 +10,8 @@ const categoryCode = requiredEnv("MARKETPLACE_E2E_STORE_CATEGORY_CODE");
 const productTypeId = requiredEnv("MARKETPLACE_E2E_PRODUCT_TYPE_ID");
 const browserOrigin = process.env.MARKETPLACE_ADMIN_BROWSER_URL || "http://127.0.0.1:4180";
 const redirectUri = process.env.MARKETPLACE_E2E_REDIRECT_URI || "http://127.0.0.1:4180/oauth/callback";
+
+const productFields = "id storeCategoryCode title description priceMinor currency providerId productTypeId status";
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -54,7 +56,7 @@ async function obtainAccessToken(page: Page, request: APIRequestContext): Promis
     }
 
     // The client may require a consent decision on its first authorization. Only visible
-    // checkboxes/buttons are used; no production credentials are written to browser storage.
+    // controls are used; no production credentials are written to browser storage.
     for (let attempt = 0; attempt < 2 && !isCallback(page.url(), state); attempt++) {
       await page.waitForLoadState("domcontentloaded").catch(() => undefined);
       if (await page.locator('input[name="username"]').isVisible().catch(() => false)) {
@@ -102,32 +104,68 @@ async function obtainAccessToken(page: Page, request: APIRequestContext): Promis
   return payload.access_token;
 }
 
-test("product lifecycle is created, edited, published and read back from Spring", async ({ page, request }) => {
-  const anonymous = await request.get(`${apiOrigin}/api/v1/store/products`);
-  expect(anonymous.status(), "protected product API must reject anonymous calls").toBe(401);
+async function graphQl(
+  request: APIRequestContext,
+  query: string,
+  variables: Record<string, unknown> = {},
+  accessToken?: string,
+): Promise<APIResponse> {
+  return request.post(`${apiOrigin}/graphql`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    data: { query, variables },
+    failOnStatusCode: false,
+  });
+}
+
+async function graphQlData<T>(
+  response: APIResponse,
+  diagnostic: string,
+): Promise<T> {
+  const rawBody = await response.text();
+  expect(response.status(), `${diagnostic}: HTTP ${response.status()} ${rawBody}`).toBe(200);
+  const envelope = JSON.parse(rawBody) as { data?: T; errors?: Array<{ message?: string }> };
+  expect(envelope.errors, `${diagnostic} GraphQL errors: ${JSON.stringify(envelope.errors)}`).toBeUndefined();
+  expect(envelope.data, `${diagnostic} returned no GraphQL data`).toBeDefined();
+  return envelope.data as T;
+}
+
+test("GraphQL-backed product lifecycle is created, edited, published and read back from Spring", async ({ page, request }) => {
+  const anonymous = await graphQl(request, "query { storeProducts(first: 1) { edges { node { id } } } }");
+  expect(anonymous.status(), "the protected GraphQL product API must reject anonymous calls").toBe(401);
 
   const accessToken = await obtainAccessToken(page, request);
   await page.addInitScript(value => {
-    // This global is read only by an E2E-specific build; production relies on the edge/BFF.
+    // This global is read only by an E2E-specific build; production relies on the authenticated edge/BFF.
     (window as Window & { __MARKETPLACE_E2E_ACCESS_TOKEN__?: string }).__MARKETPLACE_E2E_ACCESS_TOKEN__ = value;
   }, accessToken);
 
-  const apiProducts = await request.get(`${apiOrigin}/api/v1/store/products`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  expect(apiProducts.status(), await apiProducts.text()).toBe(200);
+  const roster = await graphQl(request, `
+    query StoreProductRoster {
+      storeProducts(first: 10) {
+        edges { node { id title status } }
+        pageInfo { hasNextPage endCursor }
+      }
+      storeProductTypes { id code nameEn nameAr description }
+    }
+  `, {}, accessToken);
+  const rosterData = await graphQlData<{
+    storeProducts: { edges: Array<{ node: { id: string; title: string; status: string } }> };
+    storeProductTypes: Array<{ id: string; code: string }>;
+  }>(roster, "initial GraphQL roster");
+  expect(rosterData.storeProductTypes.some(type => type.id === productTypeId),
+    "the configured ProductType must be available through GraphQL").toBeTruthy();
 
   await page.goto("/marketplace-admin");
   await expect(page.getByRole("heading", { name: "Marketplace catalog" })).toBeVisible();
   await expect(page.getByTestId("product-editor")).toBeVisible();
 
-  const title = `Playwright catalog journey ${new Date().toISOString()}`;
+  const title = `Playwright GraphQL catalog journey ${new Date().toISOString()}`;
   const editedTitle = `${title} — edited`;
 
   await page.getByTestId("category-code").fill(categoryCode);
   await page.getByTestId("product-type").selectOption(productTypeId);
   await page.getByTestId("product-title").fill(title);
-  await page.getByTestId("product-description").fill("Browser-driven Spring REST lifecycle acceptance test.");
+  await page.getByTestId("product-description").fill("Browser-driven GraphQL lifecycle acceptance test.");
   await page.getByTestId("product-price").fill("123.45");
   await page.getByTestId("product-currency").fill("SAR");
   await page.getByTestId("save-product").click();
@@ -135,34 +173,43 @@ test("product lifecycle is created, edited, published and read back from Spring"
   const createdNotice = page.getByRole("status");
   await expect(createdNotice).toContainText("Draft created:");
   const productId = (await createdNotice.innerText()).match(/[0-9a-f]{8}-[0-9a-f-]{27,}/i)?.[0];
-  expect(productId, "create response should return a product UUID").toBeTruthy();
+  expect(productId, "createStoreProduct must return a product UUID").toBeTruthy();
 
-  const draftResponse = await request.get(`${apiOrigin}/api/v1/store/products/${productId}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+  const draftResponse = await graphQl(request, `
+    query ReadStoreProduct($id: ID!) {
+      storeProduct(id: $id) { ${productFields} }
+    }
+  `, { id: productId }, accessToken);
+  const createdData = await graphQlData<{ storeProduct: Record<string, unknown> }>(draftResponse, "draft GraphQL read-back");
+  expect(createdData.storeProduct).toMatchObject({
+    id: productId,
+    title,
+    priceMinor: "12345",
+    currency: "SAR",
+    productTypeId,
+    status: "DRAFT",
   });
-  expect(draftResponse.status(), await draftResponse.text()).toBe(200);
-  const created = await draftResponse.json();
-  expect(created.id).toBe(productId);
-  expect(created.title).toBe(title);
-  expect(created.productTypeId).toBe(productTypeId);
-  expect(created.status).toBe("DRAFT");
 
   await page.getByTestId(`product-row-${productId}`).getByRole("button", { name: "Edit" }).click();
   await page.getByTestId("product-title").fill(editedTitle);
-  await page.getByTestId("product-description").fill("Updated description saved through the Dashboard REST bridge.");
+  await page.getByTestId("product-description").fill("Updated description saved through GraphQL.");
   await page.getByTestId("product-price").fill("128.99");
   await page.getByTestId("save-product").click();
   await expect(page.getByRole("status")).toContainText("Changes saved.");
 
-  const editResponse = await request.get(`${apiOrigin}/api/v1/store/products/${productId}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+  const editResponse = await graphQl(request, `
+    query ReadEditedStoreProduct($id: ID!) {
+      storeProduct(id: $id) { ${productFields} }
+    }
+  `, { id: productId }, accessToken);
+  const editedData = await graphQlData<{ storeProduct: Record<string, unknown> }>(editResponse, "edited GraphQL read-back");
+  expect(editedData.storeProduct).toMatchObject({
+    id: productId,
+    title: editedTitle,
+    description: "Updated description saved through GraphQL.",
+    priceMinor: "12899",
+    status: "DRAFT",
   });
-  expect(editResponse.status(), await editResponse.text()).toBe(200);
-  const edited = await editResponse.json();
-  expect(edited.title).toBe(editedTitle);
-  expect(edited.description).toBe("Updated description saved through the Dashboard REST bridge.");
-  expect(edited.priceMinor).toBe(12899);
-  expect(edited.status).toBe("DRAFT");
 
   await page.getByTestId("publish-product").click();
   await expect(page.getByTestId("published-readback")).toBeVisible();
@@ -170,16 +217,17 @@ test("product lifecycle is created, edited, published and read back from Spring"
   await expect(page.getByTestId("readback-price")).toHaveText("12899");
   await expect(page.getByTestId("readback-status")).toHaveText("ACTIVE");
 
-  const readBackResponse = await request.get(`${apiOrigin}/api/v1/store/products/${productId}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  expect(readBackResponse.status(), await readBackResponse.text()).toBe(200);
-  const readBack = await readBackResponse.json();
-  expect(readBack).toMatchObject({
+  const readBackResponse = await graphQl(request, `
+    query ReadPublishedStoreProduct($id: ID!) {
+      storeProduct(id: $id) { ${productFields} }
+    }
+  `, { id: productId }, accessToken);
+  const readBack = await graphQlData<{ storeProduct: Record<string, unknown> }>(readBackResponse, "published GraphQL read-back");
+  expect(readBack.storeProduct).toMatchObject({
     id: productId,
     title: editedTitle,
-    description: "Updated description saved through the Dashboard REST bridge.",
-    priceMinor: 12899,
+    description: "Updated description saved through GraphQL.",
+    priceMinor: "12899",
     currency: "SAR",
     productTypeId,
     status: "ACTIVE",

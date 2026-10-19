@@ -26,8 +26,44 @@ const emptyEditor: EditorValues = {
   productTypeId: import.meta.env.VITE_MARKETPLACE_E2E_PRODUCT_TYPE_ID || "",
 };
 
-const formatPrice = (minor: number, currency: string) =>
-  new Intl.NumberFormat(undefined, { style: "currency", currency }).format(minor / 100);
+function currencyFractionDigits(currency: string): number {
+  try {
+    return new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions().maximumFractionDigits;
+  } catch {
+    return 2;
+  }
+}
+
+function decimalToMinor(value: string, currency: string): string {
+  const digits = currencyFractionDigits(currency);
+  const normalized = value.trim();
+  const match = /^(0|[1-9][0-9]*)(?:\\.([0-9]*))?$/.exec(normalized);
+  if (!match) throw new Error("Enter a non-negative decimal amount.");
+  const fraction = match[2] || "";
+  if (fraction.length > digits) {
+    throw new Error(`This currency accepts at most ${digits} fractional digit(s).`);
+  }
+  const factor = 10n ** BigInt(digits);
+  const fractionalMinor = digits === 0 ? 0n : BigInt(fraction.padEnd(digits, "0") || "0");
+  return (BigInt(match[1]) * factor + fractionalMinor).toString();
+}
+
+function minorToDecimal(minorValue: string, currency: string): string {
+  const digits = currencyFractionDigits(currency);
+  const factor = 10n ** BigInt(digits);
+  const minor = BigInt(minorValue);
+  const whole = minor / factor;
+  if (digits === 0) return whole.toString();
+  const fraction = (minor % factor).toString().padStart(digits, "0");
+  return `${whole}.${fraction}`;
+}
+
+function formatPrice(minor: string, currency: string): string {
+  const decimal = minorToDecimal(minor, currency);
+  const [whole, fraction] = decimal.split(".");
+  const groupedWhole = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(BigInt(whole));
+  return fraction === undefined ? `${currency} ${groupedWhole}` : `${currency} ${groupedWhole}.${fraction}`;
+}
 
 const productTypeLabel = (type: PlatformProductType) =>
   type.nameEn || type.nameAr || type.code;
@@ -102,7 +138,7 @@ export default function MarketplaceAdminApp() {
       storeCategoryCode: product.storeCategoryCode,
       title: product.title,
       description: product.description || "",
-      price: (product.priceMinor / 100).toFixed(2),
+      price: minorToDecimal(product.priceMinor, product.currency),
       currency: product.currency,
       productTypeId: product.productTypeId || "",
     });
@@ -119,9 +155,7 @@ export default function MarketplaceAdminApp() {
     setNotice(null);
     setReadBack(null);
     try {
-      const price = Number(editor.price);
-      if (!Number.isFinite(price) || price < 0) throw new Error("Price must be a non-negative number.");
-      const priceMinor = Math.round(price * 100);
+      const priceMinor = decimalToMinor(editor.price, editor.currency.toUpperCase());
 
       if (editingId) {
         await marketplaceApi.updateProduct(editingId, {
@@ -168,7 +202,7 @@ export default function MarketplaceAdminApp() {
         persisted.id !== published.id ||
         persisted.status !== "ACTIVE" ||
         persisted.title !== editor.title.trim() ||
-        persisted.priceMinor !== Math.round(Number(editor.price) * 100)
+        persisted.priceMinor !== decimalToMinor(editor.price, editor.currency.toUpperCase())
       ) {
         throw new Error("Read-back did not match the published product fields.");
       }
@@ -270,19 +304,20 @@ export default function MarketplaceAdminApp() {
                 />
               </label>
               <label>
-                Product type (optional)
+                Product type
                 <select
                   data-testid="product-type"
                   name="productTypeId"
                   value={editor.productTypeId}
                   onChange={event => setField("productTypeId", event.target.value)}
+                  required
                 >
-                  <option value="">Legacy / untyped product</option>
+                  
                   {productTypes.map(type => (
                     <option key={type.id} value={type.id}>{productTypeLabel(type)} ({type.code})</option>
                   ))}
                 </select>
-                <small>For typed publishing, choose a ProductType whose required attributes can be supplied in this workflow.</small>
+                <small>Choose a ProductType to create a draft. ProductType attribute and variant editing will be separate typed GraphQL journeys.</small>
               </label>
               {selectedProductType && (
                 <p className="ma-inline-note" data-testid="selected-product-type">
@@ -299,7 +334,7 @@ export default function MarketplaceAdminApp() {
             </label>
             <label>
               Price
-              <input data-testid="product-price" name="price" type="number" min="0" step="0.01" value={editor.price} onChange={event => setField("price", event.target.value)} required />
+              <input data-testid="product-price" name="price" type="number" min="0" step={10 ** -currencyFractionDigits(editor.currency.toUpperCase())} value={editor.price} onChange={event => setField("price", event.target.value)} required />
             </label>
           </div>
           <label>
