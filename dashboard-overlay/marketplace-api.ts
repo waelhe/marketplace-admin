@@ -1,104 +1,77 @@
-export type PlatformProductStatus = "DRAFT" | "ACTIVE" | "SUSPENDED" | "ARCHIVED";
-export type PlatformVariantStatus = "ACTIVE" | "SUSPENDED" | "ARCHIVED";
-export type PlatformAttributeValueType = "TEXT" | "NUMBER" | "BOOLEAN" | "CHOICE";
-export type PlatformAttributeScope = "PRODUCT" | "VARIANT" | "VARIANT_SELECTION";
+import storeProductRosterDocument from "@platform-operations/store-product-roster.graphql?raw";
+import readStoreProductDocument from "@platform-operations/read-store-product.graphql?raw";
+import storeProductTypesDocument from "@platform-operations/store-product-types.graphql?raw";
+import storeProductAttributeValuesDocument from "@platform-operations/store-product-attribute-values.graphql?raw";
+import replaceStoreProductAttributesDocument from "@platform-operations/replace-store-product-attributes.graphql?raw";
+import storeProductVariantsDocument from "@platform-operations/store-product-variants.graphql?raw";
+import storeProductVariantAttributeValuesDocument from "@platform-operations/store-product-variant-attribute-values.graphql?raw";
+import createStoreProductVariantDocument from "@platform-operations/create-store-product-variant.graphql?raw";
+import createStoreProductDocument from "@platform-operations/create-store-product.graphql?raw";
+import updateStoreProductDocument from "@platform-operations/update-store-product.graphql?raw";
+import publishStoreProductDocument from "@platform-operations/publish-store-product.graphql?raw";
 
-export interface PlatformAttributeOption {
-  id: string;
-  code: string;
-  nameEn?: string | null;
-  nameAr?: string | null;
-  position: number;
-}
+import type {
+  StoreProduct,
+  StoreProductAttributeScope,
+  StoreProductAttributeValue,
+  StoreProductAttributeValueInput,
+  StoreProductAttributeValueType,
+  StoreProductAttributeOption,
+  StoreProductCreateInput,
+  StoreProductType,
+  StoreProductTypeAttribute,
+  StoreProductUpdateInput,
+  StoreProductVariant,
+  StoreProductVariantCreateInput,
+  StoreProductVariantStatus,
+  StoreProductStatus,
+  StoreProductRosterQuery,
+  StoreProductRosterQueryVariables,
+  ReadStoreProductQuery,
+  ReadStoreProductQueryVariables,
+  StoreProductTypesQuery,
+  StoreProductAttributeValuesQuery,
+  StoreProductAttributeValuesQueryVariables,
+  ReplaceStoreProductAttributesMutation,
+  ReplaceStoreProductAttributesMutationVariables,
+  StoreProductVariantsQuery,
+  StoreProductVariantsQueryVariables,
+  StoreProductVariantAttributeValuesQuery,
+  StoreProductVariantAttributeValuesQueryVariables,
+  CreateStoreProductVariantMutation,
+  CreateStoreProductVariantMutationVariables,
+  CreateStoreProductMutation,
+  CreateStoreProductMutationVariables,
+  UpdateStoreProductMutation,
+  UpdateStoreProductMutationVariables,
+  PublishStoreProductMutation,
+  PublishStoreProductMutationVariables,
+} from "./generated/platform-operations";
 
-export interface PlatformProductTypeAttribute {
-  assignmentId: string;
-  attributeDefinitionId: string;
-  code: string;
-  nameEn?: string | null;
-  nameAr?: string | null;
-  valueType: PlatformAttributeValueType;
-  scope: PlatformAttributeScope;
-  required: boolean;
-  position: number;
-  options: PlatformAttributeOption[];
-}
-
-export interface PlatformProductType {
-  id: string;
-  code: string;
-  nameEn?: string | null;
-  nameAr?: string | null;
-  description?: string | null;
-  attributes: PlatformProductTypeAttribute[];
-}
-
-export interface PlatformProduct {
-  id: string;
-  storeCategoryCode: string;
-  title: string;
-  description?: string | null;
-  /** Exact base-10 integer string in the currency's minor unit. */
-  priceMinor: string;
-  currency: string;
-  providerId: string;
-  productTypeId?: string | null;
-  status: PlatformProductStatus;
-}
-
-export interface PlatformAttributeValue {
-  assignmentId: string;
-  textValue?: string | null;
-  numberValue?: string | null;
-  booleanValue?: boolean | null;
-  optionId?: string | null;
-}
-
-export interface PlatformProductVariant {
-  id: string;
-  productId: string;
-  sku: string;
-  name?: string | null;
-  /** Exact base-10 integer string in the currency's minor unit. */
-  priceMinor: string;
-  currency: string;
-  providerId: string;
-  status: PlatformVariantStatus;
-  stockQuantity: number;
-  reservedQuantity: number;
-}
-
-export interface CreateProductRequest {
-  storeCategoryCode: string;
-  title: string;
-  description?: string;
-  /** Exact base-10 integer string in the currency's minor unit. */
-  priceMinor: string;
-  currency: string;
-  productTypeId?: string;
-}
-
-export interface UpdateProductRequest {
-  title: string;
-  description?: string;
-  /** Exact base-10 integer string in the currency's minor unit. */
-  priceMinor: string;
-}
-
-export interface CreateProductVariantRequest {
-  sku: string;
-  name?: string;
-  priceMinor: string;
-  attributeValues: PlatformAttributeValue[];
-}
+// Domain-facing names are aliases of GraphQL Code Generator's SDL-derived types.
+// Do not introduce parallel handwritten wire models here.
+export type PlatformProductStatus = StoreProductStatus;
+export type PlatformVariantStatus = StoreProductVariantStatus;
+export type PlatformAttributeValueType = StoreProductAttributeValueType;
+export type PlatformAttributeScope = StoreProductAttributeScope;
+export type PlatformAttributeOption = StoreProductAttributeOption;
+export type PlatformProductTypeAttribute = StoreProductTypeAttribute;
+export type PlatformProductType = StoreProductType;
+export type PlatformProduct = StoreProduct;
+export type PlatformAttributeValue = StoreProductAttributeValue;
+export type PlatformAttributeValueInput = StoreProductAttributeValueInput;
+export type PlatformProductVariant = StoreProductVariant;
+export type CreateProductRequest = StoreProductCreateInput;
+export type UpdateProductRequest = StoreProductUpdateInput;
+export type CreateProductVariantRequest = StoreProductVariantCreateInput;
 
 type GraphQlError = {
   message: string;
   extensions?: { code?: string; classification?: string };
 };
 
-type GraphQlEnvelope<T> = {
-  data?: T;
+type GraphQlEnvelope<TData> = {
+  data?: TData | null;
   errors?: GraphQlError[];
 };
 
@@ -112,10 +85,10 @@ declare global {
 const GRAPHQL_URL = import.meta.env.VITE_MARKETPLACE_GRAPHQL_URL || "/graphql";
 const E2E_MODE = import.meta.env.VITE_MARKETPLACE_E2E_MODE === "true";
 
-async function graphQl<T>(
+async function graphQl<TData, TVariables extends object = Record<string, never>>(
   query: string,
-  variables: Record<string, unknown> = {},
-): Promise<T> {
+  variables: TVariables = {} as TVariables,
+): Promise<TData> {
   const headers = new Headers({ Accept: "application/json", "Content-Type": "application/json" });
 
   // Production deployment uses the authenticated edge/BFF and its server-side TokenRelay.
@@ -134,42 +107,15 @@ async function graphQl<T>(
     throw new Error(`${response.status} ${response.statusText}`);
   }
 
-  const envelope = (await response.json()) as GraphQlEnvelope<T>;
+  const envelope = (await response.json()) as GraphQlEnvelope<TData>;
   if (envelope.errors?.length) {
     throw new Error(envelope.errors.map(error => error.message).join("; "));
   }
-  if (envelope.data === undefined) {
+  if (envelope.data == null) {
     throw new Error("GraphQL returned neither data nor a classified error.");
   }
   return envelope.data;
 }
-
-const productFields = `
-  id storeCategoryCode title description priceMinor currency providerId productTypeId status
-`;
-
-const attributeValueFields = `
-  assignmentId textValue numberValue booleanValue optionId
-`;
-
-const variantFields = `
-  id productId sku name priceMinor currency providerId status stockQuantity reservedQuantity
-`;
-
-const productTypeFields = `
-  id code nameEn nameAr description
-  attributes {
-    assignmentId attributeDefinitionId code nameEn nameAr valueType scope required position
-    options { id code nameEn nameAr position }
-  }
-`;
-
-type StoreProductRosterPage = {
-  storeProducts: {
-    edges: Array<{ node: PlatformProduct }>;
-    pageInfo: { hasNextPage: boolean; endCursor?: string | null };
-  };
-};
 
 export const marketplaceApi = {
   async listProducts(): Promise<PlatformProduct[]> {
@@ -177,16 +123,15 @@ export const marketplaceApi = {
     let after: string | null = null;
     const maxPages = 100;
     for (let page = 0; page < maxPages; page++) {
-      const data: StoreProductRosterPage = await graphQl<StoreProductRosterPage>(`
-        query StoreProductRoster($first: Int, $after: String) {
-          storeProducts(first: $first, after: $after) {
-            edges { node { ${productFields} } }
-            pageInfo { hasNextPage endCursor }
-          }
-        }
-      `, { first: 50, after });
-      products.push(...data.storeProducts.edges.map((edge: { node: PlatformProduct }) => edge.node));
-      const pageInfo: StoreProductRosterPage["storeProducts"]["pageInfo"] = data.storeProducts.pageInfo;
+      const data = await graphQl<StoreProductRosterQuery, StoreProductRosterQueryVariables>(
+        storeProductRosterDocument,
+        { first: 50, after },
+      );
+      const edges = data.storeProducts.edges ?? [];
+      for (const edge of edges) {
+        if (edge?.node) products.push(edge.node);
+      }
+      const pageInfo = data.storeProducts.pageInfo;
       if (!pageInfo.hasNextPage) return products;
       if (!pageInfo.endCursor || pageInfo.endCursor === after) {
         throw new Error("GraphQL product pagination returned no advancing endCursor.");
@@ -197,99 +142,86 @@ export const marketplaceApi = {
   },
 
   async getProduct(id: string): Promise<PlatformProduct> {
-    const data = await graphQl<{ storeProduct: PlatformProduct }>(`
-      query ReadStoreProduct($id: ID!) {
-        storeProduct(id: $id) { ${productFields} }
-      }
-    `, { id });
+    const data = await graphQl<ReadStoreProductQuery, ReadStoreProductQueryVariables>(
+      readStoreProductDocument,
+      { id },
+    );
     if (!data.storeProduct) throw new Error("GraphQL did not return the requested owned product.");
     return data.storeProduct;
   },
 
-  listProductTypes: async (): Promise<PlatformProductType[]> => {
-    const data = await graphQl<{ storeProductTypes: PlatformProductType[] }>(`
-      query StoreProductTypes {
-        storeProductTypes { ${productTypeFields} }
-      }
-    `);
+  async listProductTypes(): Promise<PlatformProductType[]> {
+    const data = await graphQl<StoreProductTypesQuery>(storeProductTypesDocument);
     return data.storeProductTypes;
   },
 
-  listProductAttributeValues: async (productId: string): Promise<PlatformAttributeValue[]> => {
-    const data = await graphQl<{ storeProductAttributeValues: PlatformAttributeValue[] }>(`
-      query StoreProductAttributeValues($productId: ID!) {
-        storeProductAttributeValues(productId: $productId) { ${attributeValueFields} }
-      }
-    `, { productId });
+  async listProductAttributeValues(productId: string): Promise<PlatformAttributeValue[]> {
+    const data = await graphQl<StoreProductAttributeValuesQuery, StoreProductAttributeValuesQueryVariables>(
+      storeProductAttributeValuesDocument,
+      { productId },
+    );
     return data.storeProductAttributeValues;
   },
 
-  replaceProductAttributeValues: async (
+  async replaceProductAttributeValues(
     id: string,
-    values: PlatformAttributeValue[],
-  ): Promise<PlatformAttributeValue[]> => {
-    const data = await graphQl<{ replaceStoreProductAttributes: PlatformAttributeValue[] }>(`
-      mutation ReplaceStoreProductAttributes($id: ID!, $values: [StoreProductAttributeValueInput!]!) {
-        replaceStoreProductAttributes(id: $id, values: $values) { ${attributeValueFields} }
-      }
-    `, { id, values });
+    values: PlatformAttributeValueInput[],
+  ): Promise<PlatformAttributeValue[]> {
+    const data = await graphQl<
+      ReplaceStoreProductAttributesMutation,
+      ReplaceStoreProductAttributesMutationVariables
+    >(replaceStoreProductAttributesDocument, { id, values });
     return data.replaceStoreProductAttributes;
   },
 
-  listProductVariants: async (productId: string): Promise<PlatformProductVariant[]> => {
-    const data = await graphQl<{ storeProductVariants: PlatformProductVariant[] }>(`
-      query StoreProductVariants($productId: ID!) {
-        storeProductVariants(productId: $productId) { ${variantFields} }
-      }
-    `, { productId });
+  async listProductVariants(productId: string): Promise<PlatformProductVariant[]> {
+    const data = await graphQl<StoreProductVariantsQuery, StoreProductVariantsQueryVariables>(
+      storeProductVariantsDocument,
+      { productId },
+    );
     return data.storeProductVariants;
   },
 
-  listVariantAttributeValues: async (variantId: string): Promise<PlatformAttributeValue[]> => {
-    const data = await graphQl<{ storeProductVariantAttributeValues: PlatformAttributeValue[] }>(`
-      query StoreProductVariantAttributeValues($variantId: ID!) {
-        storeProductVariantAttributeValues(variantId: $variantId) { ${attributeValueFields} }
-      }
-    `, { variantId });
+  async listVariantAttributeValues(variantId: string): Promise<PlatformAttributeValue[]> {
+    const data = await graphQl<
+      StoreProductVariantAttributeValuesQuery,
+      StoreProductVariantAttributeValuesQueryVariables
+    >(storeProductVariantAttributeValuesDocument, { variantId });
     return data.storeProductVariantAttributeValues;
   },
 
-  createProductVariant: async (
+  async createProductVariant(
     productId: string,
     input: CreateProductVariantRequest,
-  ): Promise<PlatformProductVariant> => {
-    const data = await graphQl<{ createStoreProductVariant: PlatformProductVariant }>(`
-      mutation CreateStoreProductVariant($productId: ID!, $input: StoreProductVariantCreateInput!) {
-        createStoreProductVariant(productId: $productId, input: $input) { ${variantFields} }
-      }
-    `, { productId, input });
+  ): Promise<PlatformProductVariant> {
+    const data = await graphQl<
+      CreateStoreProductVariantMutation,
+      CreateStoreProductVariantMutationVariables
+    >(createStoreProductVariantDocument, { productId, input });
     return data.createStoreProductVariant;
   },
 
-  createProduct: async (input: CreateProductRequest): Promise<PlatformProduct> => {
-    const data = await graphQl<{ createStoreProduct: PlatformProduct }>(`
-      mutation CreateStoreProduct($input: StoreProductCreateInput!) {
-        createStoreProduct(input: $input) { ${productFields} }
-      }
-    `, { input });
+  async createProduct(input: CreateProductRequest): Promise<PlatformProduct> {
+    const data = await graphQl<CreateStoreProductMutation, CreateStoreProductMutationVariables>(
+      createStoreProductDocument,
+      { input },
+    );
     return data.createStoreProduct;
   },
 
-  updateProduct: async (id: string, input: UpdateProductRequest): Promise<PlatformProduct> => {
-    const data = await graphQl<{ updateStoreProduct: PlatformProduct }>(`
-      mutation UpdateStoreProduct($id: ID!, $input: StoreProductUpdateInput!) {
-        updateStoreProduct(id: $id, input: $input) { ${productFields} }
-      }
-    `, { id, input });
+  async updateProduct(id: string, input: UpdateProductRequest): Promise<PlatformProduct> {
+    const data = await graphQl<UpdateStoreProductMutation, UpdateStoreProductMutationVariables>(
+      updateStoreProductDocument,
+      { id, input },
+    );
     return data.updateStoreProduct;
   },
 
-  publishProduct: async (id: string): Promise<PlatformProduct> => {
-    const data = await graphQl<{ publishStoreProduct: PlatformProduct }>(`
-      mutation PublishStoreProduct($id: ID!) {
-        publishStoreProduct(id: $id) { ${productFields} }
-      }
-    `, { id });
+  async publishProduct(id: string): Promise<PlatformProduct> {
+    const data = await graphQl<PublishStoreProductMutation, PublishStoreProductMutationVariables>(
+      publishStoreProductDocument,
+      { id },
+    );
     return data.publishStoreProduct;
   },
 };
