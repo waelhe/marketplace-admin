@@ -1,0 +1,108 @@
+import {
+  type CustomCell,
+  type CustomRenderer,
+  getMiddleCenterBias,
+  GridCellKind,
+  type ProvideEditorCallback,
+} from "@glideapps/glide-data-grid";
+
+import { type Locale } from "../../Locale/Locale";
+import { type NumericEditorEmpty, useDatagridNumericEdit } from "./useDatagridNumericEdit";
+
+export const numberCellEmptyValue = Symbol("number-cell-empty-value");
+export interface NumberCellProps {
+  readonly kind: "number-cell";
+  readonly value: number | typeof numberCellEmptyValue;
+  readonly options?: {
+    format?: "number" | "percent";
+    hasFloatingPoint?: boolean;
+    cursor?: "pointer" | "default";
+  };
+}
+
+export type NumberCell = CustomCell<NumberCellProps>;
+
+const floatOrDigits = /^\d+$|^[0-9]+[.,]?[0-9]+$/;
+
+const NumberCellEdit: ReturnType<ProvideEditorCallback<NumberCell>> = ({
+  value: cell,
+  onChange,
+  initialValue,
+  isHighlighted,
+}) => {
+  const commit = (next: number | NumericEditorEmpty): void => {
+    onChange({
+      ...cell,
+      data: {
+        ...cell.data,
+        value: typeof next === "number" ? next : numberCellEmptyValue,
+      },
+    });
+  };
+  const { draft, inputRef, setDraft } = useDatagridNumericEdit({
+    committedValue: cell.data.value,
+    emptyValue: numberCellEmptyValue,
+    initialValue,
+    isHighlighted,
+    onCommit: commit,
+  });
+
+  return (
+    <input
+      ref={inputRef}
+      type="number"
+      onChange={event => {
+        const next = event.target.value;
+
+        setDraft(next);
+        commit(next === "" ? numberCellEmptyValue : Number.parseFloat(next));
+      }}
+      value={draft}
+      autoFocus
+    />
+  );
+};
+
+export const numberCellRenderer = (locale: Locale): CustomRenderer<NumberCell> => ({
+  kind: GridCellKind.Custom,
+  isMatch: (c): c is NumberCell => (c.data as any).kind === "number-cell",
+  draw: (args, cell) => {
+    const { ctx, theme, rect } = args;
+    const { value, options } = cell.data;
+    let formatted = value === numberCellEmptyValue ? "-" : value.toLocaleString(locale);
+
+    if (options?.format === "percent") {
+      formatted += "%";
+    }
+
+    ctx.fillStyle = theme.textDark;
+    ctx.textAlign = "right";
+    ctx.fillText(
+      formatted,
+      rect.x + rect.width - 8,
+      rect.y + rect.height / 2 + getMiddleCenterBias(ctx, theme),
+    );
+
+    return true;
+  },
+  provideEditor: () => ({
+    editor: NumberCellEdit,
+    disablePadding: true,
+    deletedValue: cell => ({
+      ...cell,
+      copyData: "",
+      data: {
+        ...cell.data,
+        value: numberCellEmptyValue,
+      },
+    }),
+  }),
+  onPaste: (value, data) => {
+    const isValueValid = floatOrDigits.test(value);
+
+    return {
+      ...data,
+      value: isValueValid ? parseFloat(value) : numberCellEmptyValue,
+    };
+  },
+});

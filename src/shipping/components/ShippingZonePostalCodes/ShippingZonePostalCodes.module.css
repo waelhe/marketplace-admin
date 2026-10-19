@@ -1,0 +1,10 @@
+.postalCodeRow + .postalCodeRow {
+  border-top: 1px solid var(--mu-colors-border-default1);
+}
+
+.radioOption {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 400px;
+}

@@ -1,0 +1,185 @@
+// @ts-strict-ignore
+import { type AttributeInput } from "@dashboard/components/Attributes/Attributes";
+import { type ReferenceListValue } from "@dashboard/components/Attributes/referenceValueAppearance";
+import { type FileChoiceType } from "@dashboard/components/FileUploadField/FileUploadField";
+import { type ModelTypeIcon } from "@dashboard/components/ModelTypeIcon/constants";
+import { type AttributeValueFragment } from "@dashboard/graphql";
+import { type FetchMoreProps } from "@dashboard/types";
+import { getProductErrorMessage } from "@dashboard/utils/errors";
+import getAccountErrorMessage from "@dashboard/utils/errors/account";
+import getPageErrorMessage from "@dashboard/utils/errors/page";
+import { getEntityUrl } from "@dashboard/utils/maps";
+import { type Option } from "@saleor/macaw-ui-next";
+import { type IntlShape } from "react-intl";
+
+import { type AttributeFieldError } from "./types";
+
+export function getAttributeRowLabelProps(attribute: AttributeInput) {
+  return {
+    inputType: attribute.data.inputType,
+    entityType: attribute.data.entityType,
+    unit: attribute.data.unit,
+  };
+}
+
+export function getFileChoice(attribute: AttributeInput): FileChoiceType {
+  const attributeValue = attribute.value?.length > 0 && attribute.value[0];
+  const definedAttributeValue = attribute.data.values.find(
+    definedValue => definedValue.slug === attributeValue,
+  );
+
+  if (definedAttributeValue) {
+    return {
+      file: definedAttributeValue.file,
+      label: definedAttributeValue.name,
+      value: definedAttributeValue.slug,
+    };
+  }
+
+  return {
+    label: attributeValue,
+    value: attributeValue,
+  };
+}
+
+export function getReferenceDisplayValue(
+  attribute: AttributeInput,
+  icons?: Map<string, ModelTypeIcon>,
+): ReferenceListValue[] {
+  if (!attribute.value || attribute.value.length === 0) {
+    return [];
+  }
+
+  if (!attribute.data.references || attribute.data.references.length === 0) {
+    return [];
+  }
+
+  return attribute.data.references.map(referenceData => {
+    return {
+      label: referenceData.primary ?? referenceData.label,
+      value: referenceData.value,
+      icon: icons?.get(referenceData.value) ?? referenceData.icon,
+      caption: referenceData.caption,
+      thumbnailUrl: referenceData.thumbnailUrl,
+      url: getEntityUrl({
+        entityType: attribute.data.entityType,
+        entityId: referenceData.value,
+      }),
+    };
+  });
+}
+
+export function getSingleReferenceDisplayValue(
+  attribute: AttributeInput,
+  icons?: Map<string, ModelTypeIcon>,
+): ReferenceListValue | null {
+  if (!attribute.value || attribute.value.length === 0) {
+    return null;
+  }
+
+  const reference = attribute?.data?.references?.[0];
+
+  if (reference) {
+    return {
+      label: reference.primary ?? reference.label,
+      value: reference.value,
+      icon: icons?.get(reference.value) ?? reference.icon,
+      caption: reference.caption,
+      thumbnailUrl: reference.thumbnailUrl,
+      url: getEntityUrl({
+        entityType: attribute.data.entityType,
+        entityId: reference.value,
+      }),
+    };
+  }
+
+  return null;
+}
+
+export function getMultiChoices(values: AttributeValueFragment[]): Option[] {
+  return values.map(value => ({
+    label: value.name,
+    value: value.slug,
+  }));
+}
+
+export function resolveByAttributeId<T>(
+  value: T[] | ((attributeId: string) => T[]) | undefined,
+  attributeId: string,
+): T[] {
+  if (typeof value === "function") {
+    return value(attributeId);
+  }
+
+  return value ?? [];
+}
+
+export function resolveFetchMoreByAttributeId(
+  value: FetchMoreProps | ((attributeId: string) => FetchMoreProps) | undefined,
+  attributeId: string,
+): FetchMoreProps | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return typeof value === "function" ? value(attributeId) : value;
+}
+
+export function getSingleDisplayValue(
+  attribute: AttributeInput,
+  attributeValues: AttributeValueFragment[],
+): string {
+  return (
+    attribute.data.selectedValues?.find(value => value.slug === attribute.value[0])?.name ||
+    attributeValues.find(value => value.slug === attribute.value[0])?.name ||
+    attribute.data.values.find(value => value.slug === attribute.value[0])?.name ||
+    attribute.value[0] ||
+    ""
+  );
+}
+
+export function getMultiDisplayValue(
+  attribute: AttributeInput,
+  attributeValues: AttributeValueFragment[],
+): Option[] {
+  if (!attribute.value) {
+    return [];
+  }
+
+  return attribute.value.map(attributeValue => {
+    const definedAttributeValue =
+      attributeValues.find(definedValue => definedValue.slug === attributeValue) ||
+      attribute.data.values.find(definedValue => definedValue.slug === attributeValue);
+
+    if (definedAttributeValue) {
+      return {
+        label: definedAttributeValue.name,
+        value: definedAttributeValue.slug,
+      };
+    }
+
+    return {
+      label: attributeValue,
+      value: attributeValue,
+    };
+  });
+}
+
+export function getErrorMessage(err: AttributeFieldError | undefined, intl: IntlShape): string {
+  switch (err?.__typename) {
+    case "ProductError":
+      return getProductErrorMessage(err, intl);
+    case "PageError":
+      return getPageErrorMessage(err, intl);
+    case "AccountError":
+      return getAccountErrorMessage(err, intl);
+  }
+}
+
+export function getTruncatedTextValue(value: string | undefined, length: number) {
+  if (!value) {
+    return value;
+  }
+
+  return value.length > length ? value.slice(0, length) + "..." : value;
+}
