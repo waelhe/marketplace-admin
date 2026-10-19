@@ -2,8 +2,17 @@ name: Marketplace Admin — Spring GraphQL lifecycle E2E
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: "Backend target for the Spring GraphQL lifecycle test"
+        type: choice
+        options:
+          - non-production
+          - production
+        default: non-production
+        required: true
   # The workflow is not dispatchable until it exists on the default branch.
-  # Before merge, a deliberate PR label can request the same protected-environment gate.
+  # Before merge, deliberate PR labels can request a non-production or owner-approved production run.
   pull_request:
     types: [labeled]
     paths:
@@ -25,14 +34,16 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
-       contains(github.event.pull_request.labels.*.name, 'run-spring-e2e'))
+       (contains(github.event.pull_request.labels.*.name, 'run-spring-e2e') ||
+        contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production')))
     name: Browser create → edit → publish → GraphQL read-back
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    # Configure this protected environment with a dedicated non-production backend.
+    # Keep credentials in this protected environment; production is selected explicitly.
     environment: marketplace-e2e
     env:
-      MARKETPLACE_E2E_API_ORIGIN: ${{ vars.MARKETPLACE_E2E_API_ORIGIN }}
+      MARKETPLACE_E2E_TARGET_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.target || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production') && 'production') || 'non-production' }}
+      MARKETPLACE_E2E_API_ORIGIN: ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'production' || github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production')) && (vars.MARKETPLACE_PRODUCTION_API_ORIGIN || 'https://app-java-v3-production-59bf.up.railway.app') || vars.MARKETPLACE_E2E_API_ORIGIN }}
       MARKETPLACE_E2E_CLIENT_ID: ${{ vars.MARKETPLACE_E2E_CLIENT_ID }}
       MARKETPLACE_E2E_CLIENT_SECRET: ${{ secrets.MARKETPLACE_E2E_CLIENT_SECRET }}
       MARKETPLACE_E2E_USERNAME: ${{ secrets.MARKETPLACE_E2E_USERNAME }}
@@ -40,8 +51,7 @@ jobs:
       MARKETPLACE_E2E_REDIRECT_URI: ${{ vars.MARKETPLACE_E2E_REDIRECT_URI }}
       MARKETPLACE_E2E_STORE_CATEGORY_CODE: ${{ vars.MARKETPLACE_E2E_STORE_CATEGORY_CODE }}
       MARKETPLACE_E2E_PRODUCT_TYPE_ID: ${{ vars.MARKETPLACE_E2E_PRODUCT_TYPE_ID }}
-      MARKETPLACE_E2E_TARGET_APPROVED: ${{ vars.MARKETPLACE_E2E_TARGET_APPROVED }}
-      MARKETPLACE_PRODUCTION_API_ORIGIN: ${{ vars.MARKETPLACE_PRODUCTION_API_ORIGIN }}
+      MARKETPLACE_PRODUCTION_API_ORIGIN: ${{ vars.MARKETPLACE_PRODUCTION_API_ORIGIN || 'https://app-java-v3-production-59bf.up.railway.app' }}
       MARKETPLACE_ADMIN_BROWSER_URL: http://127.0.0.1:4180
       MARKETPLACE_ADMIN_PREVIEW_ORIGIN: http://127.0.0.1:4173
       MARKETPLACE_ADMIN_PROXY_PORT: "4180"
@@ -69,15 +79,29 @@ jobs:
           cache: pnpm
           cache-dependency-path: dashboard/pnpm-lock.yaml
 
-      - name: Validate dedicated test target and credentials
+      - name: Validate explicitly selected target and credentials
         shell: bash
         run: |
           set -euo pipefail
-          test "$MARKETPLACE_E2E_TARGET_APPROVED" = "yes" || {
-            echo "::error::Set marketplace-e2e environment variable MARKETPLACE_E2E_TARGET_APPROVED=yes only after verifying the target is a dedicated non-production test backend."
-            exit 1
-          }
-          test -n "$MARKETPLACE_E2E_API_ORIGIN"
+          case "$MARKETPLACE_E2E_TARGET_MODE" in
+            production)
+              test "$MARKETPLACE_E2E_API_ORIGIN" = "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
+                echo "::error::Production mode must target the configured Railway production origin."
+                exit 1
+              }
+              ;;
+            non-production)
+              test -n "$MARKETPLACE_E2E_API_ORIGIN"
+              test "$MARKETPLACE_E2E_API_ORIGIN" != "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
+                echo "::error::Production origin requires explicit production target selection."
+                exit 1
+              }
+              ;;
+            *)
+              echo "::error::Unknown MARKETPLACE_E2E_TARGET_MODE."
+              exit 1
+              ;;
+          esac
           test -n "$MARKETPLACE_E2E_CLIENT_ID"
           test -n "$MARKETPLACE_E2E_CLIENT_SECRET"
           test -n "$MARKETPLACE_E2E_USERNAME"
@@ -85,19 +109,25 @@ jobs:
           test -n "$MARKETPLACE_E2E_STORE_CATEGORY_CODE"
           test -n "$MARKETPLACE_E2E_PRODUCT_TYPE_ID"
           test -n "$MARKETPLACE_E2E_REDIRECT_URI"
-          test -n "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
-            echo "::error::Set MARKETPLACE_PRODUCTION_API_ORIGIN so the workflow can refuse direct mutation of the production origin."
-            exit 1
-          }
           node --input-type=module -e '
             const api = new URL(process.env.MARKETPLACE_E2E_API_ORIGIN);
             if (!["http:", "https:"].includes(api.protocol) || api.pathname !== "/" || api.search || api.hash) {
               throw new Error("MARKETPLACE_E2E_API_ORIGIN must be a backend origin only, with no path/query/hash");
             }
             const production = new URL(process.env.MARKETPLACE_PRODUCTION_API_ORIGIN);
-            if (api.origin === production.origin) throw new Error("Refusing mutating E2E tests against the configured production API origin.");
-            console.log("E2E target syntax and production-origin guard passed.");
+            const mode = process.env.MARKETPLACE_E2E_TARGET_MODE;
+            if (mode === "production" && api.origin !== production.origin) {
+              throw new Error("Production mode must use the configured production origin.");
+            }
+            if (mode !== "production" && api.origin === production.origin) {
+              throw new Error("Production origin requires explicit production target selection.");
+            }
+            console.log("E2E target mode " + mode + " validated for " + api.origin + ".");
           '
+          curl --fail --silent --show-error "$MARKETPLACE_E2E_API_ORIGIN/actuator/health/liveness" >/dev/null || {
+            echo "::error::The selected Spring backend is not responding on /actuator/health/liveness."
+            exit 1
+          }
 
       - name: Apply platform overlay and verify upstream identity
         run: node scripts/apply-dashboard-overlay.mjs dashboard
