@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: import-saleor-dashboard-3-23-39
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   import-pinned-dashboard:
