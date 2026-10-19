@@ -1,0 +1,37 @@
+query StoreProductRoster($first: Int, $after: String) {
+  storeProducts(first: $first, after: $after) {
+    edges {
+      node {
+        id
+        storeCategoryCode
+        title
+        description
+        priceMinor
+        currency
+        providerId
+        productTypeId
+        status
+      }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+  storeProductTypes {
+    id
+    code
+    nameEn
+    nameAr
+    description
+    attributes {
+      assignmentId
+      attributeDefinitionId
+      code
+      nameEn
+      nameAr
+      valueType
+      scope
+      required
+      position
+      options { id code nameEn nameAr position }
+    }
+  }
+}
