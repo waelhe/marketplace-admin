@@ -94,12 +94,14 @@ if (!navigation.includes('id: "marketplace-admin"')) {
 
 const sourceDir = join(repoRoot, "dashboard-overlay");
 // Keep GraphQL operation documents and schema generation sourced from this repository.
+if (dashboardRoot !== resolve(repoRoot)) {
 const operationsTarget = join(dashboardRoot, "platform-operations");
 await rm(operationsTarget, { recursive: true, force: true });
 await cp(join(repoRoot, "platform-operations"), operationsTarget, { recursive: true });
 await copyFile(join(repoRoot, "codegen-platform.ts"), join(dashboardRoot, "codegen-platform.ts"));
 await copyFile(join(repoRoot, "scripts/sync-platform-graphql-schema.mjs"),
   join(dashboardRoot, "scripts/sync-platform-graphql-schema.mjs"));
+}
 
 const dashboardTsconfigPath = join(dashboardRoot, "tsconfig.json");
 const dashboardTsconfig = JSON.parse(await readFile(dashboardTsconfigPath, "utf8"));
