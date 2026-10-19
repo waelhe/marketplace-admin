@@ -71,15 +71,17 @@ jobs:
           test -n "$MARKETPLACE_E2E_PASSWORD"
           test -n "$MARKETPLACE_E2E_STORE_CATEGORY_CODE"
           test -n "$MARKETPLACE_E2E_PRODUCT_TYPE_ID"
+          test -n "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
+            echo "::error::Set MARKETPLACE_PRODUCTION_API_ORIGIN so the workflow can refuse direct mutation of the production origin."
+            exit 1
+          }
           node --input-type=module -e '
             const api = new URL(process.env.MARKETPLACE_E2E_API_ORIGIN);
             if (!["http:", "https:"].includes(api.protocol) || api.pathname !== "/" || api.search || api.hash) {
               throw new Error("MARKETPLACE_E2E_API_ORIGIN must be a backend origin only, with no path/query/hash");
             }
-            if (process.env.MARKETPLACE_PRODUCTION_API_ORIGIN) {
-              const production = new URL(process.env.MARKETPLACE_PRODUCTION_API_ORIGIN);
-              if (api.origin === production.origin) throw new Error("Refusing mutating E2E tests against the configured production API origin.");
-            }
+            const production = new URL(process.env.MARKETPLACE_PRODUCTION_API_ORIGIN);
+            if (api.origin === production.origin) throw new Error("Refusing mutating E2E tests against the configured production API origin.");
             console.log("E2E target syntax and production-origin guard passed.");
           '
 
