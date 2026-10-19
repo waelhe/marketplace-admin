@@ -192,9 +192,12 @@ export default function MarketplaceAdminApp() {
             Create a product draft, edit it, publish it, then verify the persisted record from Spring.
           </p>
         </div>
-        <button className="ma-button ma-button--secondary" type="button" onClick={() => void refresh()} disabled={loading}>
-          Refresh list
-        </button>
+        <div className="marketplace-admin__header-actions">
+          <a className="ma-button ma-button--secondary" href="/">Back to Dashboard</a>
+          <button className="ma-button ma-button--secondary" type="button" onClick={() => void refresh()} disabled={loading}>
+            Refresh list
+          </button>
+        </div>
       </header>
 
       {error && (
