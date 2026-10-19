@@ -41,7 +41,7 @@
     "fetch-schema:main": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-release-schema.ts",
     "fetch-schema:staging": "curl https://raw.githubusercontent.com/saleor/saleor/main/saleor/graphql/schema.graphql > schema-staging.graphql",
     "format:check": "prettier --check .",
-    "generate": "pnpm run generate:main && pnpm run generate:staging",
+    "generate": "pnpm run generate:main && pnpm run generate:staging && pnpm run generate:platform",
     "generate:main": "graphql-codegen --config codegen-main.ts",
     "generate:staging": "graphql-codegen --config codegen-staging.ts",
     "graphql-lint-unused": "graphql-lint-unused-fields . --advanced",
@@ -67,7 +67,8 @@
     "test:lint-rules": "node lint/rules/named-styles.test.mjs && node lint/rules/named-effects.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-changesets.test.ts && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-release-schema.test.ts",
     "test:quiet": "jest --silent",
     "test:watch": "jest --watch",
-    "update-payment-assets": "node scripts/update-payment-assets.cjs"
+    "update-payment-assets": "node scripts/update-payment-assets.cjs",
+    "generate:platform": "node scripts/sync-platform-graphql-schema.mjs && graphql-codegen --config codegen-platform.ts"
   },
   "config": {
     "saleor": {
