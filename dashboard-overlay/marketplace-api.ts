@@ -1,4 +1,28 @@
 export type PlatformProductStatus = "DRAFT" | "ACTIVE" | "SUSPENDED" | "ARCHIVED";
+export type PlatformVariantStatus = "ACTIVE" | "SUSPENDED" | "ARCHIVED";
+export type PlatformAttributeValueType = "TEXT" | "NUMBER" | "BOOLEAN" | "CHOICE";
+export type PlatformAttributeScope = "PRODUCT" | "VARIANT" | "VARIANT_SELECTION";
+
+export interface PlatformAttributeOption {
+  id: string;
+  code: string;
+  nameEn?: string | null;
+  nameAr?: string | null;
+  position: number;
+}
+
+export interface PlatformProductTypeAttribute {
+  assignmentId: string;
+  attributeDefinitionId: string;
+  code: string;
+  nameEn?: string | null;
+  nameAr?: string | null;
+  valueType: PlatformAttributeValueType;
+  scope: PlatformAttributeScope;
+  required: boolean;
+  position: number;
+  options: PlatformAttributeOption[];
+}
 
 export interface PlatformProductType {
   id: string;
@@ -6,6 +30,7 @@ export interface PlatformProductType {
   nameEn?: string | null;
   nameAr?: string | null;
   description?: string | null;
+  attributes: PlatformProductTypeAttribute[];
 }
 
 export interface PlatformProduct {
@@ -19,6 +44,28 @@ export interface PlatformProduct {
   providerId: string;
   productTypeId?: string | null;
   status: PlatformProductStatus;
+}
+
+export interface PlatformAttributeValue {
+  assignmentId: string;
+  textValue?: string | null;
+  numberValue?: string | null;
+  booleanValue?: boolean | null;
+  optionId?: string | null;
+}
+
+export interface PlatformProductVariant {
+  id: string;
+  productId: string;
+  sku: string;
+  name?: string | null;
+  /** Exact base-10 integer string in the currency's minor unit. */
+  priceMinor: string;
+  currency: string;
+  providerId: string;
+  status: PlatformVariantStatus;
+  stockQuantity: number;
+  reservedQuantity: number;
 }
 
 export interface CreateProductRequest {
@@ -36,6 +83,13 @@ export interface UpdateProductRequest {
   description?: string;
   /** Exact base-10 integer string in the currency's minor unit. */
   priceMinor: string;
+}
+
+export interface CreateProductVariantRequest {
+  sku: string;
+  name?: string;
+  priceMinor: string;
+  attributeValues: PlatformAttributeValue[];
 }
 
 type GraphQlError = {
@@ -94,19 +148,50 @@ const productFields = `
   id storeCategoryCode title description priceMinor currency providerId productTypeId status
 `;
 
+const attributeValueFields = `
+  assignmentId textValue numberValue booleanValue optionId
+`;
+
+const variantFields = `
+  id productId sku name priceMinor currency providerId status stockQuantity reservedQuantity
+`;
+
+const productTypeFields = `
+  id code nameEn nameAr description
+  attributes {
+    assignmentId attributeDefinitionId code nameEn nameAr valueType scope required position
+    options { id code nameEn nameAr position }
+  }
+`;
+
 export const marketplaceApi = {
   async listProducts(): Promise<PlatformProduct[]> {
-    const data = await graphQl<{
-      storeProducts: { edges: Array<{ node: PlatformProduct }> };
-    }>(`
-      query StoreProductRoster {
-        storeProducts(first: 50) {
-          edges { node { ${productFields} } }
-          pageInfo { hasNextPage endCursor }
+    const products: PlatformProduct[] = [];
+    let after: string | null = null;
+    const maxPages = 100;
+    for (let page = 0; page < maxPages; page++) {
+      const data = await graphQl<{
+        storeProducts: {
+          edges: Array<{ node: PlatformProduct }>;
+          pageInfo: { hasNextPage: boolean; endCursor?: string | null };
+        };
+      }>(`
+        query StoreProductRoster($first: Int, $after: String) {
+          storeProducts(first: $first, after: $after) {
+            edges { node { ${productFields} } }
+            pageInfo { hasNextPage endCursor }
+          }
         }
+      `, { first: 50, after });
+      products.push(...data.storeProducts.edges.map(edge => edge.node));
+      const pageInfo = data.storeProducts.pageInfo;
+      if (!pageInfo.hasNextPage) return products;
+      if (!pageInfo.endCursor || pageInfo.endCursor === after) {
+        throw new Error("GraphQL product pagination returned no advancing endCursor.");
       }
-    `);
-    return data.storeProducts.edges.map(edge => edge.node);
+      after = pageInfo.endCursor;
+    }
+    throw new Error("Product roster exceeds the 5,000-item administration safety bound.");
   },
 
   async getProduct(id: string): Promise<PlatformProduct> {
@@ -122,10 +207,61 @@ export const marketplaceApi = {
   listProductTypes: async (): Promise<PlatformProductType[]> => {
     const data = await graphQl<{ storeProductTypes: PlatformProductType[] }>(`
       query StoreProductTypes {
-        storeProductTypes { id code nameEn nameAr description }
+        storeProductTypes { ${productTypeFields} }
       }
     `);
     return data.storeProductTypes;
+  },
+
+  listProductAttributeValues: async (productId: string): Promise<PlatformAttributeValue[]> => {
+    const data = await graphQl<{ storeProductAttributeValues: PlatformAttributeValue[] }>(`
+      query StoreProductAttributeValues($productId: ID!) {
+        storeProductAttributeValues(productId: $productId) { ${attributeValueFields} }
+      }
+    `, { productId });
+    return data.storeProductAttributeValues;
+  },
+
+  replaceProductAttributeValues: async (
+    id: string,
+    values: PlatformAttributeValue[],
+  ): Promise<PlatformAttributeValue[]> => {
+    const data = await graphQl<{ replaceStoreProductAttributes: PlatformAttributeValue[] }>(`
+      mutation ReplaceStoreProductAttributes($id: ID!, $values: [StoreProductAttributeValueInput!]!) {
+        replaceStoreProductAttributes(id: $id, values: $values) { ${attributeValueFields} }
+      }
+    `, { id, values });
+    return data.replaceStoreProductAttributes;
+  },
+
+  listProductVariants: async (productId: string): Promise<PlatformProductVariant[]> => {
+    const data = await graphQl<{ storeProductVariants: PlatformProductVariant[] }>(`
+      query StoreProductVariants($productId: ID!) {
+        storeProductVariants(productId: $productId) { ${variantFields} }
+      }
+    `, { productId });
+    return data.storeProductVariants;
+  },
+
+  listVariantAttributeValues: async (variantId: string): Promise<PlatformAttributeValue[]> => {
+    const data = await graphQl<{ storeProductVariantAttributeValues: PlatformAttributeValue[] }>(`
+      query StoreProductVariantAttributeValues($variantId: ID!) {
+        storeProductVariantAttributeValues(variantId: $variantId) { ${attributeValueFields} }
+      }
+    `, { variantId });
+    return data.storeProductVariantAttributeValues;
+  },
+
+  createProductVariant: async (
+    productId: string,
+    input: CreateProductVariantRequest,
+  ): Promise<PlatformProductVariant> => {
+    const data = await graphQl<{ createStoreProductVariant: PlatformProductVariant }>(`
+      mutation CreateStoreProductVariant($productId: ID!, $input: StoreProductVariantCreateInput!) {
+        createStoreProductVariant(productId: $productId, input: $input) { ${variantFields} }
+      }
+    `, { productId, input });
+    return data.createStoreProductVariant;
   },
 
   createProduct: async (input: CreateProductRequest): Promise<PlatformProduct> => {
@@ -151,7 +287,7 @@ export const marketplaceApi = {
       mutation PublishStoreProduct($id: ID!) {
         publishStoreProduct(id: $id) { ${productFields} }
       }
-    `, { id });
+    `);
     return data.publishStoreProduct;
   },
 };
