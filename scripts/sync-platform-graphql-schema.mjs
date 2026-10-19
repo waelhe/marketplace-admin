@@ -123,7 +123,6 @@ const runtimeHasCatalog = Boolean(
 const needsCatalogOverlay = pendingPr.merged !== true || !runtimeHasCatalog;
 if (needsCatalogOverlay) {
   const pending = parse(catalogText);
-  const pending = parse(pendingText);
   const pendingQuery = objectDefinition(pending, "Query");
   const pendingMutation = objectDefinition(pending, "Mutation");
   if (!pendingQuery || !pendingMutation) {
