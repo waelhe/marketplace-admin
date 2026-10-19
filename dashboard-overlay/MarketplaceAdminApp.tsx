@@ -304,19 +304,20 @@ export default function MarketplaceAdminApp() {
                 />
               </label>
               <label>
-                Product type (optional)
+                Product type
                 <select
                   data-testid="product-type"
                   name="productTypeId"
                   value={editor.productTypeId}
                   onChange={event => setField("productTypeId", event.target.value)}
+                  required
                 >
-                  <option value="">Legacy / untyped product</option>
+                  
                   {productTypes.map(type => (
                     <option key={type.id} value={type.id}>{productTypeLabel(type)} ({type.code})</option>
                   ))}
                 </select>
-                <small>For typed publishing, choose a ProductType whose required attributes can be supplied in this workflow.</small>
+                <small>Choose a ProductType to create a draft. ProductType attribute and variant editing will be separate typed GraphQL journeys.</small>
               </label>
               {selectedProductType && (
                 <p className="ma-inline-note" data-testid="selected-product-type">
