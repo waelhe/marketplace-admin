@@ -1,17 +1,9 @@
 name: Import pinned Saleor Dashboard source
 
 on:
-  push:
-    branches:
-      - feat/spring-rest-dashboard-bridge
-    paths:
-      - ".github/workflows/import-upstream-dashboard.yml"
-      - "dashboard-overlay/**"
-      - "platform-e2e/**"
-      - "scripts/apply-dashboard-overlay.mjs"
-      - "scripts/e2e-proxy.mjs"
-      - "PLATFORM_INTEGRATION.md"
-      - "README.md"
+  # Bootstrap/rebase is deliberate and manual: it commits the full upstream tree.
+  # Ordinary overlay changes are compiled by dashboard-build.yml without pushing
+  # a second, bot-authored commit that would leave the PR head without fresh checks.
   workflow_dispatch:
 
 permissions:
