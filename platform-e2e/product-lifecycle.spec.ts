@@ -179,13 +179,18 @@ test("typed catalog lifecycle uses generated GraphQL operations through the actu
   await expect(page.getByRole("heading", { name: "Marketplace catalog" })).toBeVisible();
   await expect(page.getByTestId("product-editor")).toBeVisible();
 
-  const title = `Playwright GraphQL catalog journey ${new Date().toISOString()}`;
+  const runId = process.env.GITHUB_RUN_ID
+    ? `${process.env.GITHUB_RUN_ID}-attempt-${process.env.GITHUB_RUN_ATTEMPT || "1"}`
+    : `local-${Date.now()}`;
+  const title = `E2E TEST — NOT FOR SALE — run ${runId} — Marketplace Admin GraphQL lifecycle`;
   const editedTitle = `${title} — edited`;
 
   await page.getByTestId("category-code").fill(categoryCode);
   await page.getByTestId("product-type").selectOption(productTypeId);
   await page.getByTestId("product-title").fill(title);
-  await page.getByTestId("product-description").fill("Browser-driven typed GraphQL lifecycle acceptance test.");
+  await page.getByTestId("product-description").fill(
+    "E2E TEST DATA ONLY — NOT FOR SALE. Published by the Marketplace Admin acceptance test; not a customer offer.",
+  );
   await page.getByTestId("product-price").fill("123.45");
   await page.getByTestId("product-currency").fill("SAR");
   await page.getByTestId("save-product").click();
@@ -195,6 +200,22 @@ test("typed catalog lifecycle uses generated GraphQL operations through the actu
   const productId = (await createdNotice.innerText()).match(/[0-9a-f]{8}-[0-9a-f-]{27,}/i)?.[0];
   expect(productId, "createStoreProduct must return a product UUID").toBeTruthy();
   if (!productId) throw new Error("The create mutation did not expose the product UUID.");
+
+  test.info().annotations.push({
+    type: "retained-shared-production-test-data",
+    description: `Product ${productId} is durable test data in the shared production catalog. This test intentionally does not delete or unpublish it.`,
+  });
+  await test.info().attach("retained-production-test-product.json", {
+    body: JSON.stringify({
+      target: "shared-production",
+      productId,
+      title,
+      statusAtCreation: "DRAFT",
+      cleanup: "intentionally-not-performed",
+      note: "This product may remain in the live catalog if a later assertion fails.",
+    }, null, 2),
+    contentType: "application/json",
+  });
 
   const draftVariables = { id: productId };
   const draftResponse = await graphQl(
@@ -258,7 +279,7 @@ test("typed catalog lifecycle uses generated GraphQL operations through the actu
   );
   const sku = `PW-GQL-${Date.now()}`;
   await page.getByTestId("variant-sku").fill(sku);
-  await page.getByTestId("variant-name").fill("Playwright typed variant");
+  await page.getByTestId("variant-name").fill("E2E TEST ONLY — NOT FOR SALE");
   await page.getByTestId("variant-price").fill("129.99");
   for (const attribute of variantAttributes) {
     const field = page.getByTestId(`variant-attribute-${attribute.assignmentId}`);
@@ -315,7 +336,9 @@ test("typed catalog lifecycle uses generated GraphQL operations through the actu
     .toEqual(variantAttributes.map(attribute => attribute.assignmentId).sort());
 
   await page.getByTestId("product-title").fill(editedTitle);
-  await page.getByTestId("product-description").fill("Updated description saved through GraphQL.");
+  await page.getByTestId("product-description").fill(
+    "E2E TEST DATA ONLY — NOT FOR SALE. Updated by the Marketplace Admin acceptance test; not a customer offer.",
+  );
   await page.getByTestId("product-price").fill("128.99");
   await page.getByTestId("save-product").click();
   await expect(page.getByRole("status")).toContainText("Changes saved.");
@@ -330,7 +353,7 @@ test("typed catalog lifecycle uses generated GraphQL operations through the actu
   expect(editedData.storeProduct).toMatchObject({
     id: productId,
     title: editedTitle,
-    description: "Updated description saved through GraphQL.",
+    description: "E2E TEST DATA ONLY — NOT FOR SALE. Updated by the Marketplace Admin acceptance test; not a customer offer.",
     priceMinor: "12899",
     status: "DRAFT",
   });
@@ -351,10 +374,22 @@ test("typed catalog lifecycle uses generated GraphQL operations through the actu
   expect(readBack.storeProduct).toMatchObject({
     id: productId,
     title: editedTitle,
-    description: "Updated description saved through GraphQL.",
+    description: "E2E TEST DATA ONLY — NOT FOR SALE. Updated by the Marketplace Admin acceptance test; not a customer offer.",
     priceMinor: "12899",
     currency: "SAR",
     productTypeId,
     status: "ACTIVE",
+  });
+  await test.info().attach("retained-production-test-result.json", {
+    body: JSON.stringify({
+      target: "shared-production",
+      productId,
+      title: editedTitle,
+      status: readBack.storeProduct?.status ?? "UNKNOWN",
+      variantSku: sku,
+      cleanup: "intentionally-not-performed",
+      note: "Published E2E product and variant remain in the production catalog for transparency; each run uses a unique run ID.",
+    }, null, 2),
+    contentType: "application/json",
   });
 });
