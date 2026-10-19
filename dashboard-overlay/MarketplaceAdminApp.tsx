@@ -224,11 +224,17 @@ export default function MarketplaceAdminApp() {
     setEditingId(null);
     setEditor(emptyEditor);
     setReadBack(null);
+    setProductAttributeValues({});
+    setVariants([]);
+    setVariantAttributeValues({});
+    setVariantSku("");
+    setVariantName("");
+    setVariantPrice("");
     setError(null);
     setNotice(null);
   };
 
-  const beginEdit = (product: PlatformProduct) => {
+  const beginEdit = async (product: PlatformProduct) => {
     setEditingId(product.id);
     setEditor({
       storeCategoryCode: product.storeCategoryCode,
@@ -241,7 +247,79 @@ export default function MarketplaceAdminApp() {
     setReadBack(null);
     setNotice(null);
     setError(null);
+    setProductAttributeValues({});
+    setVariants([]);
+    setVariantAttributeValues({});
+    setVariantSku("");
+    setVariantName("");
+    setVariantPrice("");
+    try {
+      const [attributeValues, nextVariants] = await Promise.all([
+        marketplaceApi.listProductAttributeValues(product.id),
+        marketplaceApi.listProductVariants(product.id),
+      ]);
+      setProductAttributeValues(valuesToMap(attributeValues));
+      setVariants(nextVariants);
+    } catch (cause) {
+      setError(explainError(cause));
+    }
     document.getElementById("platform-product-editor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const setProductAttributeValue = (assignmentId: string, value: string) => {
+    setProductAttributeValues(current => ({ ...current, [assignmentId]: value }));
+  };
+
+  const setVariantAttributeValue = (assignmentId: string, value: string) => {
+    setVariantAttributeValues(current => ({ ...current, [assignmentId]: value }));
+  };
+
+  const saveProductAttributes = async () => {
+    if (!editingId) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const saved = await marketplaceApi.replaceProductAttributeValues(
+        editingId,
+        valuesFromMap(productAttributes, productAttributeValues),
+      );
+      setProductAttributeValues(valuesToMap(saved));
+      setNotice("Product attributes saved and read back through GraphQL.");
+    } catch (cause) {
+      setError(explainError(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const createVariant = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingId) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const created = await marketplaceApi.createProductVariant(editingId, {
+        sku: variantSku.trim(),
+        name: variantName.trim() || undefined,
+        priceMinor: decimalToMinor(variantPrice, editor.currency.toUpperCase()),
+        attributeValues: valuesFromMap(variantAttributes, variantAttributeValues),
+      });
+      const persistedValues = await marketplaceApi.listVariantAttributeValues(created.id);
+      setVariants(current => [...current, created].sort((left, right) => left.sku.localeCompare(right.sku)));
+      setVariantAttributeValues({});
+      setVariantSku("");
+      setVariantName("");
+      setVariantPrice("");
+      setNotice(
+        `Variant ${created.sku} created through GraphQL; ${persistedValues.length} typed attribute value(s) read back.`,
+      );
+    } catch (cause) {
+      setError(explainError(cause));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const saveDraftOrChanges = async (event: FormEvent<HTMLFormElement>) => {
@@ -270,6 +348,12 @@ export default function MarketplaceAdminApp() {
           ...(editor.productTypeId ? { productTypeId: editor.productTypeId } : {}),
         });
         setEditingId(created.id);
+        setProductAttributeValues({});
+        setVariants([]);
+        setVariantAttributeValues({});
+        setVariantSku("");
+        setVariantName("");
+        setVariantPrice("");
         setNotice(`Draft created: ${created.id}`);
       }
 
