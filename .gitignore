@@ -75,3 +75,8 @@ playwright-failures*/
 /platform-contracts/generated-schema.graphqls
 /platform-contracts/.manifest.json
 /dashboard-overlay/generated/
+
+# The overlay self-apply artifact (scripts/apply-dashboard-overlay.mjs copies platform-e2e/
+# here when run against the repo root) — generated, never hand-edited, never tracked.
+# platform-e2e/ is the single source of truth.
+/e2e-marketplace-admin/
