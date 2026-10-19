@@ -4,6 +4,7 @@ const dashboardOrigin = new URL(process.env.MARKETPLACE_ADMIN_PREVIEW_ORIGIN || 
 const apiOriginRaw = process.env.MARKETPLACE_E2E_API_ORIGIN;
 if (!apiOriginRaw) throw new Error("MARKETPLACE_E2E_API_ORIGIN is required; use a dedicated non-production test environment.");
 const apiOrigin = new URL(apiOriginRaw);
+const browserOrigin = new URL(process.env.MARKETPLACE_ADMIN_BROWSER_URL || "http://127.0.0.1:4180");
 const port = Number(process.env.MARKETPLACE_ADMIN_PROXY_PORT || 4180);
 const hopByHop = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade", "host", "content-length", "accept-encoding"]);
 
@@ -35,10 +36,24 @@ const server = http.createServer(async (req, res) => {
     });
     const outHeaders = {};
     upstream.headers.forEach((value, name) => {
-      if (!["content-encoding", "content-length", "transfer-encoding", "connection"].includes(name.toLowerCase())) {
+      const lowerName = name.toLowerCase();
+      if (!["content-encoding", "content-length", "transfer-encoding", "connection", "set-cookie"].includes(lowerName)) {
         outHeaders[name] = value;
       }
     });
+    const cookies = upstream.headers.getSetCookie?.() || [];
+    if (cookies.length) outHeaders["set-cookie"] = cookies;
+
+    // The backend sees its real upstream host, while the browser stays on the local
+    // same-origin proxy. Rewrite only backend-origin redirects so the session cookie
+    // remains on the proxy origin during the interactive Spring login/PKCE flow.
+    const location = upstream.headers.get("location");
+    if (location) {
+      const redirect = new URL(location, base);
+      outHeaders.location = redirect.origin === apiOrigin.origin
+        ? `${browserOrigin.origin}${redirect.pathname}${redirect.search}${redirect.hash}`
+        : location;
+    }
     res.writeHead(upstream.status, outHeaders);
     res.end(Buffer.from(await upstream.arrayBuffer()));
   } catch (error) {
