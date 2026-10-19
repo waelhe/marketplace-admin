@@ -38,7 +38,7 @@ function currencyFractionDigits(currency: string): number {
 function decimalToMinor(value: string, currency: string): string {
   const digits = currencyFractionDigits(currency);
   const normalized = value.trim();
-  const match = /^(0|[1-9][0-9]*)(?:\\.([0-9]*))?$/.exec(normalized);
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]*))?$/.exec(normalized);
   if (!match) throw new Error("Enter a non-negative decimal amount.");
   const fraction = match[2] || "";
   if (fraction.length > digits) {
