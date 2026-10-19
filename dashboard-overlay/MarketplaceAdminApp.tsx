@@ -56,6 +56,8 @@ export default function MarketplaceAdminApp() {
   const [notice, setNotice] = useState<string | null>(null);
   const [readBack, setReadBack] = useState<PlatformProduct | null>(null);
 
+  const authenticationRequired = error?.includes("authenticated edge") ?? false;
+
   const selectedProductType = useMemo(
     () => productTypes.find(type => type.id === editor.productTypeId),
     [editor.productTypeId, productTypes],
@@ -195,7 +197,12 @@ export default function MarketplaceAdminApp() {
         </button>
       </header>
 
-      {error && <div className="ma-alert ma-alert--error" role="alert">{error}</div>}
+      {error && (
+        <div className="ma-alert ma-alert--error" role="alert">
+          <span>{error}</span>{" "}
+          {authenticationRequired && <a className="ma-alert__signin" href="/oauth2/authorization/marketplace-web-client">Sign in</a>}
+        </div>
+      )}
       {notice && <div className="ma-alert ma-alert--success" role="status">{notice}</div>}
 
       <section className="ma-panel" aria-labelledby="products-title">
