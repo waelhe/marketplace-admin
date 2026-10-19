@@ -8,14 +8,14 @@ on:
     paths:
       - "dashboard-overlay/**"
       - "scripts/apply-dashboard-overlay.mjs"
-      - "e2e/**"
+      - "platform-e2e/**"
       - ".github/workflows/dashboard-build.yml"
       - "README.md"
   pull_request:
     paths:
       - "dashboard-overlay/**"
       - "scripts/apply-dashboard-overlay.mjs"
-      - "e2e/**"
+      - "platform-e2e/**"
       - ".github/workflows/dashboard-build.yml"
       - "README.md"
   workflow_dispatch:
