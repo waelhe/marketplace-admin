@@ -168,6 +168,7 @@ test("typed catalog lifecycle uses generated GraphQL operations through the actu
     accessToken,
   );
   const rosterData = await graphQlData<StoreProductRosterQuery>(roster, "initial generated GraphQL roster");
+  expect(rosterData.storeProducts.edges).toBeDefined();
   const typesResponse = await graphQl(
     request,
     operation("store-product-types.graphql"),
