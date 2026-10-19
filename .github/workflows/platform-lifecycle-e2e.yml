@@ -43,7 +43,7 @@ jobs:
     environment: marketplace-e2e
     env:
       MARKETPLACE_E2E_TARGET_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.target || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production') && 'production') || 'non-production' }}
-      MARKETPLACE_E2E_API_ORIGIN: ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'production' || github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production')) && (vars.MARKETPLACE_PRODUCTION_API_ORIGIN || 'https://app-java-v3-production-59bf.up.railway.app') || vars.MARKETPLACE_E2E_API_ORIGIN }}
+      MARKETPLACE_E2E_API_ORIGIN: ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'production' || github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production')) && vars.MARKETPLACE_PRODUCTION_API_ORIGIN || vars.MARKETPLACE_E2E_API_ORIGIN }}
       MARKETPLACE_E2E_CLIENT_ID: ${{ vars.MARKETPLACE_E2E_CLIENT_ID }}
       MARKETPLACE_E2E_CLIENT_SECRET: ${{ secrets.MARKETPLACE_E2E_CLIENT_SECRET }}
       MARKETPLACE_E2E_USERNAME: ${{ secrets.MARKETPLACE_E2E_USERNAME }}
@@ -51,7 +51,7 @@ jobs:
       MARKETPLACE_E2E_REDIRECT_URI: ${{ vars.MARKETPLACE_E2E_REDIRECT_URI }}
       MARKETPLACE_E2E_STORE_CATEGORY_CODE: ${{ vars.MARKETPLACE_E2E_STORE_CATEGORY_CODE }}
       MARKETPLACE_E2E_PRODUCT_TYPE_ID: ${{ vars.MARKETPLACE_E2E_PRODUCT_TYPE_ID }}
-      MARKETPLACE_PRODUCTION_API_ORIGIN: ${{ vars.MARKETPLACE_PRODUCTION_API_ORIGIN || 'https://app-java-v3-production-59bf.up.railway.app' }}
+      MARKETPLACE_PRODUCTION_API_ORIGIN: ${{ vars.MARKETPLACE_PRODUCTION_API_ORIGIN }}
       MARKETPLACE_ADMIN_BROWSER_URL: http://127.0.0.1:4180
       MARKETPLACE_ADMIN_PREVIEW_ORIGIN: http://127.0.0.1:4173
       MARKETPLACE_ADMIN_PROXY_PORT: "4180"
@@ -79,10 +79,36 @@ jobs:
           cache: pnpm
           cache-dependency-path: dashboard/pnpm-lock.yaml
 
+      - name: Apply platform overlay and verify upstream identity
+        run: node scripts/apply-dashboard-overlay.mjs dashboard
+
+      - name: Install Dashboard dependencies from lockfile
+        working-directory: dashboard
+        run: pnpm install --frozen-lockfile
+
+      - name: Assemble runtime SDL and generate platform operation types
+        working-directory: dashboard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/sync-platform-graphql-schema.mjs
+          pnpm exec graphql-codegen --config codegen-platform.ts
+
+      - name: Type-check generated Playwright GraphQL contract
+        working-directory: dashboard
+        run: >-
+          pnpm exec tsc --noEmit --target ES2022 --module ESNext
+          --moduleResolution Bundler --strict --skipLibCheck --types node
+          e2e-marketplace-admin/product-lifecycle.spec.ts
+
       - name: Validate explicitly selected target and credentials
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
+            echo "::error::Set the repository/environment variable MARKETPLACE_PRODUCTION_API_ORIGIN to the live service origin; no stale fallback is used."
+            exit 1
+          }
           case "$MARKETPLACE_E2E_TARGET_MODE" in
             production)
               test "$MARKETPLACE_E2E_API_ORIGIN" = "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
@@ -128,28 +154,6 @@ jobs:
             echo "::error::The selected Spring backend is not responding on /actuator/health/liveness."
             exit 1
           }
-
-      - name: Apply platform overlay and verify upstream identity
-        run: node scripts/apply-dashboard-overlay.mjs dashboard
-
-      - name: Install Dashboard dependencies from lockfile
-        working-directory: dashboard
-        run: pnpm install --frozen-lockfile
-
-      - name: Assemble runtime SDL and generate platform operation types
-        working-directory: dashboard
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          node scripts/sync-platform-graphql-schema.mjs
-          pnpm exec graphql-codegen --config codegen-platform.ts
-
-      - name: Type-check generated Playwright GraphQL contract
-        working-directory: dashboard
-        run: >-
-          pnpm exec tsc --noEmit --target ES2022 --module ESNext
-          --moduleResolution Bundler --strict --skipLibCheck --types node
-          e2e-marketplace-admin/product-lifecycle.spec.ts
 
       - name: Install Chromium for Playwright
         working-directory: dashboard
