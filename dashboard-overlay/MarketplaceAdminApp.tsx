@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import {
   marketplaceApi,
   type PlatformAttributeValue,
+  type PlatformAttributeValueInput,
   type PlatformProduct,
   type PlatformProductType,
   type PlatformProductTypeAttribute,
@@ -86,8 +87,8 @@ function valuesToMap(values: PlatformAttributeValue[]): Record<string, string> {
 function valuesFromMap(
   attributes: PlatformProductTypeAttribute[],
   values: Record<string, string>,
-): PlatformAttributeValue[] {
-  const result: PlatformAttributeValue[] = [];
+): PlatformAttributeValueInput[] {
+  const result: PlatformAttributeValueInput[] = [];
   for (const attribute of attributes) {
     const value = values[attribute.assignmentId];
     if (value === undefined || value === "") continue;
