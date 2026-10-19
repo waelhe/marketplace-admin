@@ -1,4 +1,5 @@
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
 
 const repoRoot = process.cwd();
@@ -17,6 +18,9 @@ async function write(path, value) {
 function requireShape(condition, message) {
   if (!condition) throw new Error(`Dashboard overlay refused to apply: ${message}`);
 }
+
+const actualCommit = execFileSync("git", ["-C", dashboardRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+requireShape(actualCommit === pinnedCommit, `expected pinned upstream commit ${pinnedCommit}, found ${actualCommit}`);
 
 const packageJson = JSON.parse(await read("package.json"));
 requireShape(packageJson.name === "saleor-dashboard", `unexpected package name: ${packageJson.name}`);
