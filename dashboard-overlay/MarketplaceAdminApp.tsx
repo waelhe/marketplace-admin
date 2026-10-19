@@ -202,7 +202,7 @@ export default function MarketplaceAdminApp() {
         persisted.id !== published.id ||
         persisted.status !== "ACTIVE" ||
         persisted.title !== editor.title.trim() ||
-        persisted.priceMinor !== Math.round(Number(editor.price) * 100)
+        persisted.priceMinor !== decimalToMinor(editor.price, editor.currency.toUpperCase())
       ) {
         throw new Error("Read-back did not match the published product fields.");
       }
