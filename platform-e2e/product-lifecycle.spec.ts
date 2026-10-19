@@ -1,5 +1,20 @@
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test, type Page, type APIRequestContext, type APIResponse } from "@playwright/test";
+
+import type {
+  StoreProductAttributeValuesQuery,
+  StoreProductAttributeValuesQueryVariables,
+  StoreProductRosterQuery,
+  StoreProductRosterQueryVariables,
+  StoreProductVariantAttributeValuesQuery,
+  StoreProductVariantAttributeValuesQueryVariables,
+  StoreProductVariantsQuery,
+  StoreProductVariantsQueryVariables,
+  ReadStoreProductQuery,
+  ReadStoreProductQueryVariables,
+} from "../src/marketplaceAdmin/generated/platform-operations";
 
 const apiOrigin = requiredEnv("MARKETPLACE_E2E_API_ORIGIN").replace(/\/$/, "");
 const clientId = requiredEnv("MARKETPLACE_E2E_CLIENT_ID");
@@ -11,12 +26,15 @@ const productTypeId = requiredEnv("MARKETPLACE_E2E_PRODUCT_TYPE_ID");
 const browserOrigin = process.env.MARKETPLACE_ADMIN_BROWSER_URL || "http://127.0.0.1:4180";
 const redirectUri = process.env.MARKETPLACE_E2E_REDIRECT_URI || "http://127.0.0.1:4180/oauth/callback";
 
-const productFields = "id storeCategoryCode title description priceMinor currency providerId productTypeId status";
-
 function requiredEnv(name: string): string {
   const value = process.env[name];
   if (!value?.trim()) throw new Error(`Missing required test environment variable: ${name}`);
   return value.trim();
+}
+
+/** Reuse the source-controlled operation documents validated by GraphQL Code Generator. */
+function operation(name: string): string {
+  return readFileSync(resolve(process.cwd(), "platform-operations", name), "utf8");
 }
 
 function isCallback(url: string, expectedState: string): boolean {
@@ -27,9 +45,8 @@ function isCallback(url: string, expectedState: string): boolean {
 }
 
 /**
- * Obtain a short-lived user token using the existing Spring Authorization Server PKCE flow.
- * The confidential client secret stays in the Node/Playwright process and is never bundled
- * into the Dashboard or placed in browser storage. Production UI requests go through edge/BFF.
+ * Obtain a short-lived user token using Spring Authorization Server's Authorization Code + PKCE flow.
+ * The confidential client secret stays in the Playwright process and is never bundled into the browser.
  */
 async function obtainAccessToken(page: Page, request: APIRequestContext): Promise<string> {
   const verifier = randomBytes(32).toString("base64url");
@@ -55,8 +72,7 @@ async function obtainAccessToken(page: Page, request: APIRequestContext): Promis
       await page.locator('button[type="submit"], input[type="submit"]').last().click();
     }
 
-    // The client may require a consent decision on its first authorization. Only visible
-    // controls are used; no production credentials are written to browser storage.
+    // First-time authorization may display a consent screen. Use visible controls only.
     for (let attempt = 0; attempt < 2 && !isCallback(page.url(), state); attempt++) {
       await page.waitForLoadState("domcontentloaded").catch(() => undefined);
       if (await page.locator('input[name="username"]').isVisible().catch(() => false)) {
@@ -74,11 +90,8 @@ async function obtainAccessToken(page: Page, request: APIRequestContext): Promis
         }
       }
       const submit = page.locator('button[type="submit"], input[type="submit"]');
-      if (await submit.count()) {
-        await submit.last().click();
-      } else {
-        break;
-      }
+      if (await submit.count()) await submit.last().click();
+      else break;
     }
   }
 
@@ -107,7 +120,7 @@ async function obtainAccessToken(page: Page, request: APIRequestContext): Promis
 async function graphQl(
   request: APIRequestContext,
   query: string,
-  variables: Record<string, unknown> = {},
+  variables: object = {},
   accessToken?: string,
 ): Promise<APIResponse> {
   return request.post(`${apiOrigin}/graphql`, {
@@ -129,49 +142,34 @@ async function graphQlData<T>(
   return envelope.data as T;
 }
 
-test("GraphQL-backed typed catalog lifecycle works in the actual Dashboard", async ({ page, request }) => {
-  const anonymous = await graphQl(request, "query { storeProducts(first: 1) { edges { node { id } } } }");
+test("typed catalog lifecycle uses generated GraphQL operations through the actual Dashboard", async ({ page, request }) => {
+  // Platform mode deliberately hides every upstream Saleor route not yet backed by platform operations.
+  await page.goto("/");
+  await expect(page.getByTestId("marketplace-admin-unavailable")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open supported catalog" }))
+    .toHaveAttribute("href", "/marketplace-admin");
+
+  const anonymousVariables: StoreProductRosterQueryVariables = { first: 1, after: null };
+  const anonymous = await graphQl(request, operation("store-product-roster.graphql"), anonymousVariables);
   expect(anonymous.status(), "the protected GraphQL product API must reject anonymous calls").toBe(401);
 
   const accessToken = await obtainAccessToken(page, request);
   await page.addInitScript(value => {
-    // This global is read only by an E2E-specific build; production relies on the authenticated edge/BFF.
+    // Read only by an E2E-specific build. Production relies on the authenticated edge/BFF.
     (window as Window & { __MARKETPLACE_E2E_ACCESS_TOKEN__?: string }).__MARKETPLACE_E2E_ACCESS_TOKEN__ = value;
   }, accessToken);
 
-  const roster = await graphQl(request, `
-    query StoreProductRoster {
-      storeProducts(first: 10) {
-        edges { node { id title status } }
-        pageInfo { hasNextPage endCursor }
-      }
-      storeProductTypes {
-        id code nameEn nameAr
-        attributes {
-          assignmentId attributeDefinitionId code valueType scope required position
-          options { id code nameEn nameAr position }
-        }
-      }
-    }
-  `, {}, accessToken);
-  const rosterData = await graphQlData<{
-    storeProducts: { edges: Array<{ node: { id: string; title: string; status: string } }> };
-    storeProductTypes: Array<{
-      id: string;
-      code: string;
-      attributes: Array<{
-        assignmentId: string;
-        code: string;
-        valueType: "TEXT" | "NUMBER" | "BOOLEAN" | "CHOICE";
-        scope: "PRODUCT" | "VARIANT" | "VARIANT_SELECTION";
-        required: boolean;
-        options: Array<{ id: string; code: string }>;
-      }>;
-    }>;
-  }>(roster, "initial GraphQL roster");
-
+  const rosterVariables: StoreProductRosterQueryVariables = { first: 10, after: null };
+  const roster = await graphQl(
+    request,
+    operation("store-product-roster.graphql"),
+    rosterVariables,
+    accessToken,
+  );
+  const rosterData = await graphQlData<StoreProductRosterQuery>(roster, "initial generated GraphQL roster");
   const configuredType = rosterData.storeProductTypes.find(type => type.id === productTypeId);
   expect(configuredType, "the configured ProductType must be available through GraphQL").toBeTruthy();
+  if (!configuredType) throw new Error("Configured ProductType is absent from the generated GraphQL response.");
 
   await page.goto("/marketplace-admin");
   await expect(page.getByRole("heading", { name: "Marketplace catalog" })).toBeVisible();
@@ -192,13 +190,16 @@ test("GraphQL-backed typed catalog lifecycle works in the actual Dashboard", asy
   await expect(createdNotice).toContainText("Draft created:");
   const productId = (await createdNotice.innerText()).match(/[0-9a-f]{8}-[0-9a-f-]{27,}/i)?.[0];
   expect(productId, "createStoreProduct must return a product UUID").toBeTruthy();
+  if (!productId) throw new Error("The create mutation did not expose the product UUID.");
 
-  const draftResponse = await graphQl(request, `
-    query ReadStoreProduct($id: ID!) {
-      storeProduct(id: $id) { ${productFields} }
-    }
-  `, { id: productId }, accessToken);
-  const createdData = await graphQlData<{ storeProduct: Record<string, unknown> }>(draftResponse, "draft GraphQL read-back");
+  const draftVariables: ReadStoreProductQueryVariables = { id: productId };
+  const draftResponse = await graphQl(
+    request,
+    operation("read-store-product.graphql"),
+    draftVariables,
+    accessToken,
+  );
+  const createdData = await graphQlData<ReadStoreProductQuery>(draftResponse, "draft GraphQL read-back");
   expect(createdData.storeProduct).toMatchObject({
     id: productId,
     title,
@@ -208,7 +209,7 @@ test("GraphQL-backed typed catalog lifecycle works in the actual Dashboard", asy
     status: "DRAFT",
   });
 
-  const configuredAttributes = configuredType!.attributes;
+  const configuredAttributes = configuredType.attributes;
   const productAttributes = configuredAttributes.filter(attribute => attribute.scope === "PRODUCT");
   for (const attribute of productAttributes) {
     const field = page.getByTestId(`product-attribute-${attribute.assignmentId}`);
@@ -232,19 +233,19 @@ test("GraphQL-backed typed catalog lifecycle works in the actual Dashboard", asy
   if (productAttributes.length > 0) {
     await page.getByTestId("save-product-attributes").click();
     await expect(page.getByRole("status")).toContainText("Product attributes saved");
-    const attributeReadResponse = await graphQl(request, `
-      query ProductAttributeReadBack($productId: ID!) {
-        storeProductAttributeValues(productId: $productId) {
-          assignmentId textValue numberValue booleanValue optionId
-        }
-      }
-    `, { productId }, accessToken);
-    const attributeReadData = await graphQlData<{
-      storeProductAttributeValues: Array<{ assignmentId: string }>;
-    }>(attributeReadResponse, "product attribute read-back");
-    expect(attributeReadData.storeProductAttributeValues.length).toBe(productAttributes.filter(
-      attribute => attribute.required,
-    ).length + productAttributes.filter(attribute => !attribute.required).length);
+    const attributeVariables: StoreProductAttributeValuesQueryVariables = { productId };
+    const attributeReadResponse = await graphQl(
+      request,
+      operation("store-product-attribute-values.graphql"),
+      attributeVariables,
+      accessToken,
+    );
+    const attributeReadData = await graphQlData<StoreProductAttributeValuesQuery>(
+      attributeReadResponse,
+      "product attribute read-back",
+    );
+    expect(attributeReadData.storeProductAttributeValues.map(value => value.assignmentId).sort())
+      .toEqual(productAttributes.map(attribute => attribute.assignmentId).sort());
   }
 
   const variantAttributes = configuredAttributes.filter(
@@ -272,32 +273,39 @@ test("GraphQL-backed typed catalog lifecycle works in the actual Dashboard", asy
         break;
     }
   }
+
   await page.getByTestId("create-variant").click();
   await expect(page.getByRole("status")).toContainText(`Variant ${sku} created through GraphQL`);
 
-  const variantRosterResponse = await graphQl(request, `
-    query VariantReadBack($productId: ID!) {
-      storeProductVariants(productId: $productId) { id sku priceMinor status }
-    }
-  `, { productId }, accessToken);
-  const variantRosterData = await graphQlData<{
-    storeProductVariants: Array<{ id: string; sku: string; priceMinor: string; status: string }>;
-  }>(variantRosterResponse, "variant roster read-back");
+  const variantVariables: StoreProductVariantsQueryVariables = { productId };
+  const variantRosterResponse = await graphQl(
+    request,
+    operation("store-product-variants.graphql"),
+    variantVariables,
+    accessToken,
+  );
+  const variantRosterData = await graphQlData<StoreProductVariantsQuery>(
+    variantRosterResponse,
+    "variant roster read-back",
+  );
   const createdVariant = variantRosterData.storeProductVariants.find(variant => variant.sku === sku);
   expect(createdVariant, "the created variant must be persisted and readable through GraphQL").toBeTruthy();
+  if (!createdVariant) throw new Error("The created variant was not returned by the generated GraphQL query.");
   expect(createdVariant).toMatchObject({ sku, priceMinor: "12999", status: "ACTIVE" });
 
-  const variantValuesResponse = await graphQl(request, `
-    query VariantAttributeReadBack($variantId: ID!) {
-      storeProductVariantAttributeValues(variantId: $variantId) {
-        assignmentId textValue numberValue booleanValue optionId
-      }
-    }
-  `, { variantId: createdVariant!.id }, accessToken);
-  const variantValues = await graphQlData<{
-    storeProductVariantAttributeValues: Array<{ assignmentId: string }>;
-  }>(variantValuesResponse, "variant attribute read-back");
-  expect(variantValues.storeProductVariantAttributeValues.length).toBe(variantAttributes.length);
+  const variantValuesVariables: StoreProductVariantAttributeValuesQueryVariables = { variantId: createdVariant.id };
+  const variantValuesResponse = await graphQl(
+    request,
+    operation("store-product-variant-attribute-values.graphql"),
+    variantValuesVariables,
+    accessToken,
+  );
+  const variantValues = await graphQlData<StoreProductVariantAttributeValuesQuery>(
+    variantValuesResponse,
+    "variant attribute read-back",
+  );
+  expect(variantValues.storeProductVariantAttributeValues.map(value => value.assignmentId).sort())
+    .toEqual(variantAttributes.map(attribute => attribute.assignmentId).sort());
 
   await page.getByTestId("product-title").fill(editedTitle);
   await page.getByTestId("product-description").fill("Updated description saved through GraphQL.");
@@ -305,12 +313,13 @@ test("GraphQL-backed typed catalog lifecycle works in the actual Dashboard", asy
   await page.getByTestId("save-product").click();
   await expect(page.getByRole("status")).toContainText("Changes saved.");
 
-  const editResponse = await graphQl(request, `
-    query ReadEditedStoreProduct($id: ID!) {
-      storeProduct(id: $id) { ${productFields} }
-    }
-  `, { id: productId }, accessToken);
-  const editedData = await graphQlData<{ storeProduct: Record<string, unknown> }>(editResponse, "edited GraphQL read-back");
+  const editResponse = await graphQl(
+    request,
+    operation("read-store-product.graphql"),
+    draftVariables,
+    accessToken,
+  );
+  const editedData = await graphQlData<ReadStoreProductQuery>(editResponse, "edited GraphQL read-back");
   expect(editedData.storeProduct).toMatchObject({
     id: productId,
     title: editedTitle,
@@ -325,12 +334,13 @@ test("GraphQL-backed typed catalog lifecycle works in the actual Dashboard", asy
   await expect(page.getByTestId("readback-price")).toHaveText("12899");
   await expect(page.getByTestId("readback-status")).toHaveText("ACTIVE");
 
-  const readBackResponse = await graphQl(request, `
-    query ReadPublishedStoreProduct($id: ID!) {
-      storeProduct(id: $id) { ${productFields} }
-    }
-  `, { id: productId }, accessToken);
-  const readBack = await graphQlData<{ storeProduct: Record<string, unknown> }>(readBackResponse, "published GraphQL read-back");
+  const readBackResponse = await graphQl(
+    request,
+    operation("read-store-product.graphql"),
+    draftVariables,
+    accessToken,
+  );
+  const readBack = await graphQlData<ReadStoreProductQuery>(readBackResponse, "published GraphQL read-back");
   expect(readBack.storeProduct).toMatchObject({
     id: productId,
     title: editedTitle,
