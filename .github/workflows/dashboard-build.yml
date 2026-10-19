@@ -77,6 +77,8 @@ jobs:
 
       - name: Assemble runtime SDL and generate platform operation types
         working-directory: dashboard
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           node scripts/sync-platform-graphql-schema.mjs
           pnpm exec graphql-codegen --config codegen-platform.ts
