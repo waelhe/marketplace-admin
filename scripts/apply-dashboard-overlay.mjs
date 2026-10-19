@@ -19,8 +19,13 @@ function requireShape(condition, message) {
   if (!condition) throw new Error(`Dashboard overlay refused to apply: ${message}`);
 }
 
-const actualCommit = execFileSync("git", ["-C", dashboardRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-requireShape(actualCommit === pinnedCommit, `expected pinned upstream commit ${pinnedCommit}, found ${actualCommit}`);
+if (dashboardRoot === resolve(repoRoot)) {
+  const sourcePin = (await read(".platform-upstream-commit")).trim();
+  requireShape(sourcePin === pinnedCommit, `expected source pin ${pinnedCommit}, found ${sourcePin}`);
+} else {
+  const actualCommit = execFileSync("git", ["-C", dashboardRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  requireShape(actualCommit === pinnedCommit, `expected pinned upstream commit ${pinnedCommit}, found ${actualCommit}`);
+}
 
 const packageJson = JSON.parse(await read("package.json"));
 requireShape(packageJson.name === "saleor-dashboard", `unexpected package name: ${packageJson.name}`);
@@ -68,6 +73,6 @@ if (!envTarget.includes("VITE_MARKETPLACE_ADMIN_MODE")) {
 
 const e2eDir = join(dashboardRoot, "e2e-marketplace-admin");
 await mkdir(e2eDir, { recursive: true });
-await copyFile(join(repoRoot, "e2e/product-lifecycle.spec.ts"), join(e2eDir, "product-lifecycle.spec.ts"));
-await copyFile(join(repoRoot, "e2e/playwright.config.ts"), join(e2eDir, "playwright.config.ts"));
+await copyFile(join(repoRoot, "platform-e2e/product-lifecycle.spec.ts"), join(e2eDir, "product-lifecycle.spec.ts"));
+await copyFile(join(repoRoot, "platform-e2e/playwright.config.ts"), join(e2eDir, "playwright.config.ts"));
 console.log(`Applied platform overlay to Saleor Dashboard ${pinnedVersion} (${pinnedCommit}).`);
