@@ -45,13 +45,10 @@ jobs:
 
           # The integration contract is kept in a separate file. The root README becomes
           # the upstream Dashboard README with a small pointer to our platform-specific docs.
-          rsync -a dashboard-upstream/ ./ \
+          rsync -a \
             --exclude='.git/' \
-            --exclude='.github/workflows/dashboard-build.yml' \
-            --exclude='.github/workflows/platform-lifecycle-e2e.yml' \
-            --exclude='.github/workflows/import-upstream-dashboard.yml' \
-            --exclude='scripts/apply-dashboard-overlay.mjs' \
-            --exclude='scripts/e2e-proxy.mjs'
+            --exclude='.github/workflows/' \
+            dashboard-upstream/ ./
 
           printf '%s\n' 'bc75e988da0fa4fbc3d47378a888d859d070746f' > .platform-upstream-commit
           cat >> README.md <<'EOF'
@@ -64,6 +61,15 @@ jobs:
           OAuth/BFF boundaries and acceptance evidence are documented in [PLATFORM_INTEGRATION.md](./PLATFORM_INTEGRATION.md).
           See the dedicated workflows for the pinned build and the Spring REST Playwright lifecycle.
           EOF
+
+          # Keep this repository's review/build/E2E gates; upstream CI assumes Saleor's
+          # own integration infrastructure and secrets and must not be activated here.
+          mkdir -p .github/workflows
+          find .github/workflows -maxdepth 1 -type f \
+            ! -name 'dashboard-build.yml' \
+            ! -name 'platform-lifecycle-e2e.yml' \
+            ! -name 'import-upstream-dashboard.yml' \
+            -delete
 
           node scripts/apply-dashboard-overlay.mjs .
           rm -rf dashboard-upstream
