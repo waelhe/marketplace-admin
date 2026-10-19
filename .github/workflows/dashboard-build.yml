@@ -87,6 +87,13 @@ jobs:
         working-directory: dashboard
         run: pnpm run check-types:src
 
+      - name: Type-check generated platform Playwright operations
+        working-directory: dashboard
+        run: >-
+          pnpm exec tsc --noEmit --target ES2022 --module ESNext
+          --moduleResolution Bundler --strict --skipLibCheck --types node
+          e2e-marketplace-admin/product-lifecycle.spec.ts
+
       - name: Build Dashboard-derived platform admin
         working-directory: dashboard
         env:
