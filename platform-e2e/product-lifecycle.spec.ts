@@ -129,7 +129,7 @@ async function graphQlData<T>(
   return envelope.data as T;
 }
 
-test("GraphQL-backed product lifecycle is created, edited, published and read back from Spring", async ({ page, request }) => {
+test("GraphQL-backed typed catalog lifecycle works in the actual Dashboard", async ({ page, request }) => {
   const anonymous = await graphQl(request, "query { storeProducts(first: 1) { edges { node { id } } } }");
   expect(anonymous.status(), "the protected GraphQL product API must reject anonymous calls").toBe(401);
 
@@ -145,15 +145,33 @@ test("GraphQL-backed product lifecycle is created, edited, published and read ba
         edges { node { id title status } }
         pageInfo { hasNextPage endCursor }
       }
-      storeProductTypes { id code nameEn nameAr description }
+      storeProductTypes {
+        id code nameEn nameAr
+        attributes {
+          assignmentId attributeDefinitionId code valueType scope required position
+          options { id code nameEn nameAr position }
+        }
+      }
     }
   `, {}, accessToken);
   const rosterData = await graphQlData<{
     storeProducts: { edges: Array<{ node: { id: string; title: string; status: string } }> };
-    storeProductTypes: Array<{ id: string; code: string }>;
+    storeProductTypes: Array<{
+      id: string;
+      code: string;
+      attributes: Array<{
+        assignmentId: string;
+        code: string;
+        valueType: "TEXT" | "NUMBER" | "BOOLEAN" | "CHOICE";
+        scope: "PRODUCT" | "VARIANT" | "VARIANT_SELECTION";
+        required: boolean;
+        options: Array<{ id: string; code: string }>;
+      }>;
+    }>;
   }>(roster, "initial GraphQL roster");
-  expect(rosterData.storeProductTypes.some(type => type.id === productTypeId),
-    "the configured ProductType must be available through GraphQL").toBeTruthy();
+
+  const configuredType = rosterData.storeProductTypes.find(type => type.id === productTypeId);
+  expect(configuredType, "the configured ProductType must be available through GraphQL").toBeTruthy();
 
   await page.goto("/marketplace-admin");
   await expect(page.getByRole("heading", { name: "Marketplace catalog" })).toBeVisible();
@@ -165,7 +183,7 @@ test("GraphQL-backed product lifecycle is created, edited, published and read ba
   await page.getByTestId("category-code").fill(categoryCode);
   await page.getByTestId("product-type").selectOption(productTypeId);
   await page.getByTestId("product-title").fill(title);
-  await page.getByTestId("product-description").fill("Browser-driven GraphQL lifecycle acceptance test.");
+  await page.getByTestId("product-description").fill("Browser-driven typed GraphQL lifecycle acceptance test.");
   await page.getByTestId("product-price").fill("123.45");
   await page.getByTestId("product-currency").fill("SAR");
   await page.getByTestId("save-product").click();
@@ -190,7 +208,99 @@ test("GraphQL-backed product lifecycle is created, edited, published and read ba
     status: "DRAFT",
   });
 
-  await page.getByTestId(`product-row-${productId}`).getByRole("button", { name: "Edit" }).click();
+  const configuredAttributes = configuredType!.attributes;
+  const productAttributes = configuredAttributes.filter(attribute => attribute.scope === "PRODUCT");
+  for (const attribute of productAttributes) {
+    const field = page.getByTestId(`product-attribute-${attribute.assignmentId}`);
+    switch (attribute.valueType) {
+      case "TEXT":
+        await field.fill(`Playwright value ${attribute.code}`);
+        break;
+      case "NUMBER":
+        await field.fill("1");
+        break;
+      case "BOOLEAN":
+        await field.selectOption("true");
+        break;
+      case "CHOICE":
+        expect(attribute.options.length, `CHOICE ${attribute.code} must have options`).toBeGreaterThan(0);
+        await field.selectOption(attribute.options[0].id);
+        break;
+    }
+  }
+
+  if (productAttributes.length > 0) {
+    await page.getByTestId("save-product-attributes").click();
+    await expect(page.getByRole("status")).toContainText("Product attributes saved");
+    const attributeReadResponse = await graphQl(request, `
+      query ProductAttributeReadBack($productId: ID!) {
+        storeProductAttributeValues(productId: $productId) {
+          assignmentId textValue numberValue booleanValue optionId
+        }
+      }
+    `, { productId }, accessToken);
+    const attributeReadData = await graphQlData<{
+      storeProductAttributeValues: Array<{ assignmentId: string }>;
+    }>(attributeReadResponse, "product attribute read-back");
+    expect(attributeReadData.storeProductAttributeValues.length).toBe(productAttributes.filter(
+      attribute => attribute.required,
+    ).length + productAttributes.filter(attribute => !attribute.required).length);
+  }
+
+  const variantAttributes = configuredAttributes.filter(
+    attribute => attribute.scope === "VARIANT" || attribute.scope === "VARIANT_SELECTION",
+  );
+  const sku = `PW-GQL-${Date.now()}`;
+  await page.getByTestId("variant-sku").fill(sku);
+  await page.getByTestId("variant-name").fill("Playwright typed variant");
+  await page.getByTestId("variant-price").fill("129.99");
+  for (const attribute of variantAttributes) {
+    const field = page.getByTestId(`variant-attribute-${attribute.assignmentId}`);
+    switch (attribute.valueType) {
+      case "TEXT":
+        await field.fill(`Variant value ${attribute.code}`);
+        break;
+      case "NUMBER":
+        await field.fill("2");
+        break;
+      case "BOOLEAN":
+        await field.selectOption("true");
+        break;
+      case "CHOICE":
+        expect(attribute.options.length, `CHOICE ${attribute.code} must have options`).toBeGreaterThan(0);
+        await field.selectOption(attribute.options[0].id);
+        break;
+    }
+  }
+  await page.getByTestId("create-variant").click();
+  await expect(page.getByRole("status")).toContainText(`Variant ${sku} created through GraphQL`);
+
+  const variantRosterResponse = await graphQl(request, `
+    query VariantReadBack($productId: ID!) {
+      storeProductVariants(productId: $productId) { id sku priceMinor status }
+    }
+  `, { productId }, accessToken);
+  const variantRosterData = await graphQlData<{
+    storeProductVariants: Array<{ id: string; sku: string; priceMinor: string; status: string }>;
+  }>(variantRosterResponse, "variant roster read-back");
+  const createdVariant = variantRosterData.storeProductVariants.find(variant => variant.sku === sku);
+  expect(createdVariant, "the created variant must be persisted and readable through GraphQL").toBeTruthy();
+  expect(createdVariant).toMatchObject({ sku, priceMinor: "12999", status: "ACTIVE" });
+
+  const variantValuesResponse = await graphQl(request, `
+    query VariantAttributeReadBack($variantId: ID!) {
+      storeProductVariantAttributeValues(variantId: $variantId) {
+        assignmentId textValue numberValue booleanValue optionId
+      }
+    }
+  `, { variantId: createdVariant!.id }, accessToken);
+  const variantValues = await graphQlData<{
+    storeProductVariantAttributeValues: Array<{ assignmentId: string }>;
+  }>(variantValuesResponse, "variant attribute read-back");
+  expect(variantValues.storeProductVariantAttributeValues.length).toBe(variantAttributes.filter(
+    attribute => attribute.required || attribute.scope === "VARIANT_SELECTION",
+  ).length);
+
   await page.getByTestId("product-title").fill(editedTitle);
   await page.getByTestId("product-description").fill("Updated description saved through GraphQL.");
   await page.getByTestId("product-price").fill("128.99");
