@@ -164,18 +164,20 @@ const productTypeFields = `
   }
 `;
 
+type StoreProductRosterPage = {
+  storeProducts: {
+    edges: Array<{ node: PlatformProduct }>;
+    pageInfo: { hasNextPage: boolean; endCursor?: string | null };
+  };
+};
+
 export const marketplaceApi = {
   async listProducts(): Promise<PlatformProduct[]> {
     const products: PlatformProduct[] = [];
     let after: string | null = null;
     const maxPages = 100;
     for (let page = 0; page < maxPages; page++) {
-      const data = await graphQl<{
-        storeProducts: {
-          edges: Array<{ node: PlatformProduct }>;
-          pageInfo: { hasNextPage: boolean; endCursor?: string | null };
-        };
-      }>(`
+      const data: StoreProductRosterPage = await graphQl<StoreProductRosterPage>(`
         query StoreProductRoster($first: Int, $after: String) {
           storeProducts(first: $first, after: $after) {
             edges { node { ${productFields} } }
@@ -183,8 +185,8 @@ export const marketplaceApi = {
           }
         }
       `, { first: 50, after });
-      products.push(...data.storeProducts.edges.map(edge => edge.node));
-      const pageInfo = data.storeProducts.pageInfo;
+      products.push(...data.storeProducts.edges.map((edge: { node: PlatformProduct }) => edge.node));
+      const pageInfo: StoreProductRosterPage["storeProducts"]["pageInfo"] = data.storeProducts.pageInfo;
       if (!pageInfo.hasNextPage) return products;
       if (!pageInfo.endCursor || pageInfo.endCursor === after) {
         throw new Error("GraphQL product pagination returned no advancing endCursor.");
