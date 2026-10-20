@@ -10,14 +10,13 @@ on:
         required: true
   # Before this workflow exists on the default branch, only this explicit PR label
   # can trigger the same mutating production test. Ordinary PR updates never run it.
+  # No paths filter here: the label itself is the explicit maintainer confirmation
+  # (the job-level `if` gates on its name). Measured 2026-10-20: a paths filter on
+  # a `labeled` event is evaluated against the last push's changed files, so a
+  # docs-only push (for example .gitignore) left the label unable to start the
+  # workflow at all — an accidental coupling the label gate never needed.
   pull_request:
     types: [labeled]
-    paths:
-      - ".github/workflows/platform-lifecycle-e2e.yml"
-      - "dashboard-overlay/**"
-      - "platform-e2e/**"
-      - "platform-operations/**"
-      - "scripts/e2e-proxy.mjs"
 
 permissions:
   contents: read
