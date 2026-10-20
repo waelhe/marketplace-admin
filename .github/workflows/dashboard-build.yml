@@ -29,9 +29,12 @@ on:
       - ".github/workflows/dashboard-build.yml"
       - "README.md"
   workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: marketplace-admin-build-${{ github.ref }}
@@ -107,3 +110,34 @@ jobs:
           path: dashboard/dist/
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Open or update scheduled contract-drift issue
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TITLE='[Platform GraphQL contract drift] Scheduled Dashboard build failed'
+          EXISTING="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open --json number,title --jq '.[] | select(.title == "[Platform GraphQL contract drift] Scheduled Dashboard build failed") | .number' | head -n 1)"
+          BODY="$(printf 'The scheduled build failed while syncing and generating operations from the latest accepted Spring contract.\n\n- Run: %s\n- Commit: %s\n- Workflow: dashboard-build.yml\n\nThis issue is auto-updated by the scheduled build and is auto-closed after a scheduled build succeeds. Do not hand-edit generated SDL; inspect the run and repair the owning contract or Dashboard adapter.' "${RUN_URL}" "${HEAD_SHA}")"
+          if [ -n "${EXISTING}" ]; then
+            gh issue comment --repo "${GITHUB_REPOSITORY}" "${EXISTING}" --body "${BODY}"
+          else
+            gh issue create --repo "${GITHUB_REPOSITORY}" --title "${TITLE}" --body "${BODY}"
+          fi
+
+      - name: Close scheduled contract-drift issue after recovery
+        if: success() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue list --repo "${GITHUB_REPOSITORY}" --state open --json number,title --jq '.[] | select(.title == "[Platform GraphQL contract drift] Scheduled Dashboard build failed") | .number' |
+          while IFS= read -r ISSUE_NUMBER; do
+            [ -n "${ISSUE_NUMBER}" ] || continue
+            gh issue close --repo "${GITHUB_REPOSITORY}" "${ISSUE_NUMBER}" --reason completed --comment "Auto-closed because the scheduled Dashboard build and platform-contract generation passed on ${GITHUB_SHA}."
+          done
