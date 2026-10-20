@@ -152,7 +152,14 @@ jobs:
       - name: Start Dashboard preview
         working-directory: dashboard
         run: |
-          pnpm run preview -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/marketplace-admin-preview.log 2>&1 &
+          # pnpm exec (not `pnpm run preview -- ...`): the script-run banner measured
+          # 2026-10-20 shows pnpm forwarding the `--` separator itself to vite, which
+          # treats it as the end-of-options marker — every flag after it (host, port,
+          # strictPort) was silently swallowed, vite bound to `localhost` (::1 on
+          # Node 24) and the 127.0.0.1 readiness curl never connected. Direct exec
+          # passes the flags straight through, the same pattern as the tsc,
+          # graphql-codegen and playwright steps.
+          pnpm exec vite preview --host 127.0.0.1 --port 4173 --strictPort > /tmp/marketplace-admin-preview.log 2>&1 &
           echo $! > /tmp/marketplace-admin-preview.pid
           for i in $(seq 1 40); do
             if curl --silent --fail http://127.0.0.1:4173/ > /dev/null; then exit 0; fi
