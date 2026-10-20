@@ -1,0 +1,9 @@
+query StoreProductAttributeValues($productId: ID!) {
+  storeProductAttributeValues(productId: $productId) {
+    assignmentId
+    textValue
+    numberValue
+    booleanValue
+    optionId
+  }
+}

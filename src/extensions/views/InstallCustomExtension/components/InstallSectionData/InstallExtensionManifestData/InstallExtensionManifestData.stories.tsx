@@ -1,0 +1,69 @@
+import { type InstallDetailsManifestData } from "@dashboard/extensions/views/InstallCustomExtension/types";
+import type { Meta, StoryObj } from "@storybook/react-vite";
+import { type ComponentProps, useState } from "react";
+import { ZodIssueCode } from "zod";
+
+import { InstallExtensionManifestData } from "./InstallExtensionManifestData";
+
+const manifest: InstallDetailsManifestData = {
+  name: "Acme Analytics",
+  brand: {
+    __typename: "AppManifestBrand",
+    logo: { __typename: "AppManifestBrandLogo", default: "https://placehold.co/64x64/png" },
+  },
+  permissions: [
+    { __typename: "Permission", code: "MANAGE_ORDERS" as any, name: "Manage orders" },
+    { __typename: "Permission", code: "MANAGE_PRODUCTS" as any, name: "Manage products" },
+  ],
+  dataPrivacyUrl: "https://example.com/privacy",
+  deprecationReason: null,
+};
+
+const meta: Meta<typeof InstallExtensionManifestData> = {
+  title: "Extensions/InstallCustomExtension/InstallExtensionManifestData",
+  component: InstallExtensionManifestData,
+  args: { manifest, deprecationAcknowledged: false, onDeprecationAcknowledgedChange: () => {} },
+};
+
+export default meta;
+type Story = StoryObj<typeof InstallExtensionManifestData>;
+
+export const Default: Story = {};
+
+export const WithIssues: Story = {
+  args: {
+    issues: [
+      {
+        code: ZodIssueCode.custom,
+        path: ["appUrl"],
+        message: "appUrl is missing",
+      },
+      {
+        code: ZodIssueCode.custom,
+        path: ["tokenTargetUrl"],
+        message: "tokenTargetUrl is not a valid URL",
+      },
+    ],
+  },
+};
+
+export const Deprecated: Story = {
+  args: {
+    manifest: {
+      ...manifest,
+      deprecationReason:
+        "Acme Analytics is replaced by Acme Insights. Install Acme Insights from Extensions and move your dashboards before the end of the year.",
+    },
+  },
+  render: (args: ComponentProps<typeof InstallExtensionManifestData>) => {
+    const [acknowledged, setAcknowledged] = useState(false);
+
+    return (
+      <InstallExtensionManifestData
+        {...args}
+        deprecationAcknowledged={acknowledged}
+        onDeprecationAcknowledgedChange={setAcknowledged}
+      />
+    );
+  },
+};

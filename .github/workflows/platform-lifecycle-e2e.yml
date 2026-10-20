@@ -1,0 +1,205 @@
+name: Marketplace Admin — Spring GraphQL lifecycle E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_shared_production_test:
+        description: "This test publishes an E2E product to the shared Railway production catalog and intentionally leaves it active."
+        type: boolean
+        default: false
+        required: true
+  # Before this workflow exists on the default branch, only this explicit PR label
+  # can trigger the same mutating production test. Ordinary PR updates never run it.
+  # No paths filter here: the label itself is the explicit maintainer confirmation
+  # (the job-level `if` gates on its name). Measured 2026-10-20: a paths filter on
+  # a `labeled` event is evaluated against the last push's changed files, so a
+  # docs-only push (for example .gitignore) left the label unable to start the
+  # workflow at all — an accidental coupling the label gate never needed.
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-admin-spring-e2e
+  cancel-in-progress: false
+
+jobs:
+  product-lifecycle:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production'))
+    name: Browser create → edit → publish → GraphQL read-back
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Keep credentials in this protected environment; production is selected explicitly.
+    environment: marketplace-e2e
+    env:
+      MARKETPLACE_E2E_CONFIRM_SHARED_PRODUCTION: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_shared_production_test || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-spring-e2e-production')) }}
+      MARKETPLACE_E2E_TARGET_MODE: shared-production
+      MARKETPLACE_E2E_API_ORIGIN: ${{ vars.MARKETPLACE_PRODUCTION_API_ORIGIN }}
+      MARKETPLACE_E2E_CLIENT_ID: ${{ vars.MARKETPLACE_E2E_CLIENT_ID }}
+      MARKETPLACE_E2E_CLIENT_SECRET: ${{ secrets.MARKETPLACE_E2E_CLIENT_SECRET }}
+      MARKETPLACE_E2E_USERNAME: ${{ secrets.MARKETPLACE_E2E_USERNAME }}
+      MARKETPLACE_E2E_PASSWORD: ${{ secrets.MARKETPLACE_E2E_PASSWORD }}
+      MARKETPLACE_E2E_REDIRECT_URI: ${{ vars.MARKETPLACE_E2E_REDIRECT_URI }}
+      MARKETPLACE_E2E_STORE_CATEGORY_CODE: ${{ vars.MARKETPLACE_E2E_STORE_CATEGORY_CODE }}
+      MARKETPLACE_E2E_PRODUCT_TYPE_ID: ${{ vars.MARKETPLACE_E2E_PRODUCT_TYPE_ID }}
+      MARKETPLACE_PRODUCTION_API_ORIGIN: ${{ vars.MARKETPLACE_PRODUCTION_API_ORIGIN }}
+      MARKETPLACE_ADMIN_BROWSER_URL: http://127.0.0.1:4180
+      MARKETPLACE_ADMIN_PREVIEW_ORIGIN: http://127.0.0.1:4173
+      MARKETPLACE_ADMIN_PROXY_PORT: "4180"
+    steps:
+      - name: Checkout overlay repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Checkout exact upstream Dashboard release
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: saleor/saleor-dashboard
+          ref: bc75e988da0fa4fbc3d47378a888d859d070746f
+          path: dashboard
+          persist-credentials: false
+
+      - name: Set up pinned pnpm from packageManager
+        uses: pnpm/action-setup@v5
+        with:
+          run_install: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v6.1.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: dashboard/pnpm-lock.yaml
+
+      - name: Apply platform overlay and verify upstream identity
+        run: node scripts/apply-dashboard-overlay.mjs dashboard
+
+      - name: Install Dashboard dependencies from lockfile
+        working-directory: dashboard
+        run: pnpm install --frozen-lockfile
+
+      - name: Assemble runtime SDL and generate platform operation types
+        working-directory: dashboard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/sync-platform-graphql-schema.mjs
+          pnpm exec graphql-codegen --config codegen-platform.ts
+
+      - name: Type-check generated Playwright GraphQL contract
+        working-directory: dashboard
+        run: >-
+          pnpm exec tsc --noEmit --target ES2022 --module ESNext
+          --moduleResolution Bundler --strict --skipLibCheck --types node
+          e2e-marketplace-admin/product-lifecycle.spec.ts
+
+      - name: Validate shared-production confirmation and credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$MARKETPLACE_E2E_CONFIRM_SHARED_PRODUCTION" = "true" || {
+            echo "::error::Confirm the shared-production lifecycle test explicitly. It publishes a clearly labelled product and leaves it active."
+            exit 1
+          }
+          test -n "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
+            echo "::error::Set the protected marketplace-e2e variable MARKETPLACE_PRODUCTION_API_ORIGIN to the live Railway service origin."
+            exit 1
+          }
+          test "$MARKETPLACE_E2E_API_ORIGIN" = "$MARKETPLACE_PRODUCTION_API_ORIGIN" || {
+            echo "::error::The shared-production test target must match MARKETPLACE_PRODUCTION_API_ORIGIN exactly."
+            exit 1
+          }
+          test -n "$MARKETPLACE_E2E_CLIENT_ID"
+          test -n "$MARKETPLACE_E2E_CLIENT_SECRET"
+          test -n "$MARKETPLACE_E2E_USERNAME"
+          test -n "$MARKETPLACE_E2E_PASSWORD"
+          test -n "$MARKETPLACE_E2E_STORE_CATEGORY_CODE"
+          test -n "$MARKETPLACE_E2E_PRODUCT_TYPE_ID"
+          test -n "$MARKETPLACE_E2E_REDIRECT_URI"
+          node --input-type=module -e '
+            const api = new URL(process.env.MARKETPLACE_E2E_API_ORIGIN);
+            if (!["http:", "https:"].includes(api.protocol) || api.pathname !== "/" || api.search || api.hash) {
+              throw new Error("MARKETPLACE_PRODUCTION_API_ORIGIN must be an HTTP(S) origin only, without path/query/hash");
+            }
+            const configuredProduction = new URL(process.env.MARKETPLACE_PRODUCTION_API_ORIGIN);
+            if (api.origin !== configuredProduction.origin) {
+              throw new Error("The E2E request target must be the configured shared production origin.");
+            }
+            console.log("Shared Railway production/test backend validated for " + api.origin + ".");
+          '
+          curl --fail --silent --show-error "$MARKETPLACE_E2E_API_ORIGIN/actuator/health/liveness" >/dev/null || {
+            echo "::error::The shared Railway production Spring backend is not responding on /actuator/health/liveness."
+            exit 1
+          }
+
+      - name: Install Chromium for Playwright
+        working-directory: dashboard
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build E2E-only Dashboard mode
+        working-directory: dashboard
+        env:
+          CI: "true"
+          VITE_MARKETPLACE_ADMIN_MODE: "true"
+          VITE_MARKETPLACE_E2E_MODE: "true"
+          VITE_MARKETPLACE_E2E_PRODUCT_TYPE_ID: ${{ vars.MARKETPLACE_E2E_PRODUCT_TYPE_ID }}
+        run: pnpm run build
+
+      - name: Start Dashboard preview
+        working-directory: dashboard
+        run: |
+          # pnpm exec (not `pnpm run preview -- ...`): the script-run banner measured
+          # 2026-10-20 shows pnpm forwarding the `--` separator itself to vite, which
+          # treats it as the end-of-options marker — every flag after it (host, port,
+          # strictPort) was silently swallowed, vite bound to `localhost` (::1 on
+          # Node 24) and the 127.0.0.1 readiness curl never connected. Direct exec
+          # passes the flags straight through, the same pattern as the tsc,
+          # graphql-codegen and playwright steps.
+          pnpm exec vite preview --host 127.0.0.1 --port 4173 --strictPort > /tmp/marketplace-admin-preview.log 2>&1 &
+          echo $! > /tmp/marketplace-admin-preview.pid
+          for i in $(seq 1 40); do
+            if curl --silent --fail http://127.0.0.1:4173/ > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/marketplace-admin-preview.log
+          exit 1
+
+      - name: Start same-origin proxy to shared Railway production backend
+        run: |
+          node scripts/e2e-proxy.mjs > /tmp/marketplace-admin-proxy.log 2>&1 &
+          echo $! > /tmp/marketplace-admin-proxy.pid
+          for i in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:4180/__health > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/marketplace-admin-proxy.log
+          exit 1
+
+      - name: Run browser-based Spring GraphQL lifecycle
+        working-directory: dashboard
+        env:
+          CI: "true"
+        run: pnpm exec playwright test --config e2e-marketplace-admin/playwright.config.ts
+
+      - name: Stop preview and proxy
+        if: always()
+        run: |
+          if test -f /tmp/marketplace-admin-preview.pid; then kill "$(cat /tmp/marketplace-admin-preview.pid)" || true; fi
+          if test -f /tmp/marketplace-admin-proxy.pid; then kill "$(cat /tmp/marketplace-admin-proxy.pid)" || true; fi
+
+      - name: Upload Playwright evidence and service logs
+        if: always()
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: marketplace-admin-spring-playwright-report
+          path: |
+            dashboard/e2e-marketplace-admin/playwright-report-marketplace-admin/
+            dashboard/test-results/
+            /tmp/marketplace-admin-preview.log
+            /tmp/marketplace-admin-proxy.log
+          if-no-files-found: warn
+          retention-days: 14

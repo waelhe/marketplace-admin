@@ -1,0 +1,892 @@
+import "@glideapps/glide-data-grid/dist/index.css";
+
+import { useRowAnchorHandler } from "@dashboard/components/Datagrid/hooks/useRowAnchorHandler";
+import { type NavigatorOpts } from "@dashboard/hooks/useNavigator";
+import { getCellAction } from "@dashboard/products/components/ProductListDatagrid/datagrid";
+import DataEditor, {
+  type CellClickedEventArgs,
+  CompactSelection,
+  type DataEditorProps,
+  type DataEditorRef,
+  type DrawHeaderCallback,
+  type EditableGridCell,
+  getMiddleCenterBias,
+  type GridCell,
+  type GridColumn,
+  type GridMouseEventArgs,
+  type GridSelection,
+  type HeaderClickedEventArgs,
+  type Item,
+  type Theme,
+} from "@glideapps/glide-data-grid";
+import { type GetRowThemeCallback } from "@glideapps/glide-data-grid/dist/ts/data-grid/data-grid-render";
+import { Box, useTheme } from "@saleor/macaw-ui-next";
+import clsx from "clsx";
+import range from "lodash/range";
+import {
+  type MutableRefObject,
+  type ReactElement,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+import { DashboardCard } from "../Card";
+import { type CardMenuItem } from "../CardMenu/CardMenu";
+import { Placeholder } from "../Placeholder/Placeholder";
+import { SaleorThrobber } from "../Throbber/SaleorThrobber";
+import { FullScreenContainer } from "./components/FullScreenContainer";
+import { PreventHistoryBack } from "./components/PreventHistoryBack";
+import { RowActions } from "./components/RowActions";
+import { TooltipContainer } from "./components/TooltipContainer";
+import { DEFAULT_ROW_MARKER_WIDTH } from "./const";
+import { useCustomCellRenderers } from "./customCells/useCustomCellRenderers";
+import { headerIcons } from "./headerIcons";
+import useDatagridChange, {
+  type DatagridChange,
+  type OnDatagridChange,
+} from "./hooks/useDatagridChange";
+import { useFullScreenMode } from "./hooks/useFullScreenMode";
+import { usePointerDragClickGuard } from "./hooks/usePointerDragClickGuard";
+import { usePortalClasses } from "./hooks/usePortalClasses";
+import { activateRowAnchor, hideRowAnchorElement, useRowAnchor } from "./hooks/useRowAnchor";
+import { useRowHover } from "./hooks/useRowHover";
+import { useScrollRight } from "./hooks/useScrollRight";
+import { type TooltipSide, useTooltipContainer } from "./hooks/useTooltipContainer";
+import { getForwardedWheelDelta } from "./rowAnchorWheel";
+import useStyles, {
+  cellHeight,
+  rowActionBarWidth as defaultRowActionBarWidth,
+  useDatagridTheme,
+  useFullScreenStyles,
+} from "./styles";
+import { type AvailableColumn } from "./types";
+import { getVisibleGridSelection, preventRowClickOnSelectionCheckbox } from "./utils";
+
+export interface GetCellContentOpts {
+  changes: MutableRefObject<DatagridChange[]>;
+  added: number[];
+  removed: number[];
+  getChangeIndex: (column: string, row: number) => number;
+}
+
+interface MenuItemsActions {
+  removeRows: (indexes: number[]) => void;
+}
+
+export interface DatagridRenderHeaderProps {
+  isFullscreenOpen: boolean;
+  toggleFullscreen: () => void;
+  addRowOnDatagrid: () => void;
+  isAnimationOpenFinished: boolean;
+}
+
+interface DatagridProps {
+  fillHandle?: boolean;
+  availableColumns: readonly AvailableColumn[];
+  emptyText: string;
+  /** Replaces the default dashed placeholder when the grid has no rows. */
+  emptyState?: ReactNode;
+  getCellError: (item: Item, opts: GetCellContentOpts) => boolean;
+  getCellContent: (item: Item, opts: GetCellContentOpts) => GridCell;
+  getColumnTooltipContent?: (colIndex: number) => string;
+  getCellTooltipContent?: (colIndex: number, rowIndex: number) => ReactNode;
+  /** Placement for cell hover tooltips. Header click tooltips always use `top`. */
+  cellTooltipSide?: TooltipSide;
+  menuItems: (index: number) => CardMenuItem[];
+  rows: number;
+  loading?: boolean;
+  selectionActions: (selection: number[], actions: MenuItemsActions) => ReactNode;
+  onChange?: OnDatagridChange;
+  /** Fired when fullscreen mode opens or closes (skips the initial closed mount). */
+  onFullscreenChange?: (isOpen: boolean) => void;
+  onHeaderClicked?: (colIndex: number, event: HeaderClickedEventArgs) => void;
+  renderColumnPicker?: () => ReactElement;
+  renderRowActions?: (index: number) => ReactElement;
+  rowActionBarWidth?: number;
+  onRowClick?: (item: Item) => void;
+  /** Fired when a cell is activated via keyboard (Enter/Space) or double-click.
+   *  Glide's `onCellActivated` covers the keyboard equivalent of `onCellClicked`.
+   *  Use this together with `onRowClick` to give clickable cells keyboard parity. */
+  onCellActivated?: (item: Item) => void;
+  onColumnMoved?: (startIndex: number, endIndex: number) => void;
+  onColumnResize?: (column: GridColumn, newSize: number) => void;
+  onRowSelectionChange?: (rowsId: number[], clearSelection: () => void) => void;
+  readonly?: boolean;
+  hasRowHover?: boolean;
+  highlightedRow?: number;
+  rowMarkers?: DataEditorProps["rowMarkers"];
+  freezeColumns?: DataEditorProps["freezeColumns"];
+  verticalBorder?: DataEditorProps["verticalBorder"];
+  columnSelect?: DataEditorProps["columnSelect"];
+  showEmptyDatagrid?: boolean;
+  rowAnchor?: (item: Item) => string;
+  rowHeight?: number | ((index: number) => number);
+  headerHeight?: number;
+  actionButtonPosition?: "left" | "right";
+  recentlyAddedColumn?: string | null; // Enables scroll to recently added column
+  onClearRecentlyAddedColumn?: () => void;
+  renderHeader?: (props: DatagridRenderHeaderProps) => ReactNode;
+  navigatorOpts?: NavigatorOpts;
+  showTopBorder?: boolean;
+  themeOverride?: Partial<Theme>;
+  controlledSelection?: GridSelection;
+  onControlledSelectionChange?: (selection: GridSelection | undefined) => void;
+  getRowThemeOverride?: GetRowThemeCallback;
+  rowMarkerWidth?: number;
+  rowMarkerTheme?: Partial<Theme>;
+  smoothScrollX?: boolean;
+  rowSelectionBlending?: DataEditorProps["rowSelectionBlending"];
+  experimental?: DataEditorProps["experimental"];
+  /**
+   * Extra empty last row that is not in `added` until the first edit.
+   * `"fullscreen"` shows it only while the grid is expanded.
+   */
+  trailingGhostRow?: boolean | "fullscreen";
+}
+
+export const Datagrid = ({
+  availableColumns,
+  emptyText,
+  emptyState,
+  getCellContent,
+  getCellError,
+  menuItems,
+  rows,
+  selectionActions,
+  onHeaderClicked,
+  onChange,
+  onFullscreenChange,
+  renderColumnPicker,
+  renderRowActions,
+  rowActionBarWidth = defaultRowActionBarWidth,
+  onRowClick,
+  onCellActivated,
+  getColumnTooltipContent,
+  getCellTooltipContent,
+  cellTooltipSide = "left",
+  readonly = false,
+  rowMarkers = "checkbox",
+  freezeColumns = 1,
+  verticalBorder,
+  columnSelect = "none",
+  onColumnMoved,
+  onColumnResize,
+  showEmptyDatagrid = false,
+  loading,
+  rowAnchor,
+  hasRowHover = false,
+  highlightedRow,
+  onRowSelectionChange,
+  actionButtonPosition = "left",
+  recentlyAddedColumn,
+  onClearRecentlyAddedColumn,
+  rowHeight = cellHeight,
+  headerHeight = cellHeight,
+  renderHeader,
+  navigatorOpts,
+  showTopBorder = true,
+  themeOverride,
+  controlledSelection,
+  onControlledSelectionChange,
+  getRowThemeOverride: getRowThemeOverrideProp,
+  rowMarkerWidth,
+  rowMarkerTheme: rowMarkerThemeOverride,
+  smoothScrollX = true,
+  experimental,
+  trailingGhostRow = false,
+  ...datagridProps
+}: DatagridProps): ReactElement => {
+  const classes = useStyles({ actionButtonPosition });
+  const { themeValues, theme } = useTheme();
+  const datagridTheme = useDatagridTheme(readonly, readonly);
+  const finalTheme = useMemo(
+    () => ({ ...datagridTheme, ...themeOverride }),
+    [datagridTheme, themeOverride],
+  );
+  // rowMarkerTheme can override specific colors for the row marker column if needed
+  // Currently using the same as the main theme for consistency
+  const rowMarkerTheme = useMemo(
+    () => ({
+      accentColor: themeValues.colors.background.accent1,
+      accentFg: themeValues.colors.background.default1,
+      accentLight: themeValues.colors.background.default2,
+      ...rowMarkerThemeOverride,
+    }),
+    [themeValues, rowMarkerThemeOverride],
+  );
+  const editor = useRef<DataEditorRef | null>(null);
+  const editorContainerRef = useRef<HTMLDivElement | null>(null);
+  const customRenderers = useCustomCellRenderers();
+  const { scrolledToRight } = useScrollRight();
+  const fullScreenClasses = useFullScreenStyles(classes);
+  const { isOpen, isAnimationOpenFinished, toggle } = useFullScreenMode(onFullscreenChange);
+  const { clearTooltip, scheduleTooltip, tooltip, setTooltip } = useTooltipContainer();
+  const [uncontrolledSelection, setUncontrolledSelection] = useState<GridSelection>();
+  const isSelectionControlled = typeof onControlledSelectionChange === "function";
+  const selection = isSelectionControlled ? controlledSelection : uncontrolledSelection;
+  const setSelectionState = useCallback(
+    (newSelection: GridSelection | undefined) => {
+      if (isSelectionControlled) {
+        onControlledSelectionChange?.(newSelection);
+
+        return;
+      }
+
+      setUncontrolledSelection(newSelection);
+    },
+    [isSelectionControlled, onControlledSelectionChange],
+  );
+  const [areCellsDirty, setCellsDirty] = useState(true);
+
+  // Wheel lands on the overlay, not the grid. Forward axes the scroller can
+  // move; leave the rest to the page. Always hide afterwards — page or grid
+  // scroll moves the row out from under the cursor, and a parked href is stale.
+  const handleRowAnchorWheel = useCallback((event: WheelEvent) => {
+    const scroller = editorContainerRef.current?.querySelector<HTMLElement>(".dvn-scroller");
+    const delta = scroller ? getForwardedWheelDelta(scroller, event) : null;
+
+    if (scroller && delta) {
+      scroller.scrollBy({ left: delta.left, top: delta.top, behavior: "auto" });
+      event.preventDefault();
+    }
+
+    const anchor = event.currentTarget;
+
+    if (anchor instanceof HTMLAnchorElement) {
+      hideRowAnchorElement(anchor);
+    }
+  }, []);
+  const { rowAnchorRef, setRowAnchorRef, setAnchorPosition } = useRowAnchor({
+    getRowAnchorUrl: rowAnchor,
+    rowMarkers,
+    availableColumns,
+    onWheel: handleRowAnchorWheel,
+  });
+  const rowAnchorHandler = useRowAnchorHandler(navigatorOpts);
+  const hideActiveRowAnchor = useCallback((): void => {
+    if (rowAnchorRef.current) {
+      hideRowAnchorElement(rowAnchorRef.current);
+    }
+  }, [rowAnchorRef]);
+  const {
+    onClickCapture,
+    onPointerCancelCapture,
+    onPointerDownCapture,
+    onPointerMoveCapture,
+    onPointerUpCapture,
+    shouldSuppressClick,
+  } = usePointerDragClickGuard(hideActiveRowAnchor);
+
+  const { handleRowHover, hoverRow } = useRowHover({
+    hasRowHover,
+    onRowHover: setAnchorPosition,
+  });
+  const handleItemHovered = useCallback(
+    (args: GridMouseEventArgs) => {
+      handleRowHover(args);
+
+      if (!getCellTooltipContent) {
+        return;
+      }
+
+      if (args.kind !== "cell") {
+        clearTooltip();
+
+        return;
+      }
+
+      const [colIndex, rowIndex] = args.location;
+      const content = getCellTooltipContent(colIndex, rowIndex);
+
+      if (content) {
+        scheduleTooltip(content, args.bounds, args.location, cellTooltipSide, "center");
+      } else {
+        clearTooltip();
+      }
+    },
+    [cellTooltipSide, clearTooltip, getCellTooltipContent, handleRowHover, scheduleTooltip],
+  );
+
+  useEffect(() => {
+    if (!tooltip) {
+      return;
+    }
+
+    const handleScroll = () => {
+      clearTooltip();
+    };
+
+    window.addEventListener("scroll", handleScroll, true);
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll, true);
+    };
+  }, [clearTooltip, tooltip]);
+
+  useEffect(() => {
+    if (recentlyAddedColumn && editor.current) {
+      const columnIndex = availableColumns.findIndex(column => column.id === recentlyAddedColumn);
+
+      if (columnIndex === -1) {
+        return;
+      }
+
+      const datagridScroll = editor.current.scrollTo;
+
+      datagridScroll(columnIndex, 0, "horizontal", 0, 0, { hAlign: "start" });
+
+      // This is required to disable scroll whenever availableColumns
+      // change (e.g. columns resized, reordered, removed)
+      if (typeof onClearRecentlyAddedColumn === "function") {
+        onClearRecentlyAddedColumn();
+      }
+    }
+  }, [recentlyAddedColumn, availableColumns, editor]);
+  usePortalClasses({ className: classes.portal });
+
+  // Macaw DynamicCombobox lists portal to document.body; Glide would treat those
+  // clicks as “outside” and close the editor before onChange. Returning false
+  // tells Glide to ignore the click for outside-detection.
+  // Match options via data-test-id too: data-portal-for is only set when Combobox
+  // has an `id`, and clicks can land on nested text/adornment nodes.
+  const isMacawPortalOutsideClick = useCallback((event: MouseEvent | TouchEvent): boolean => {
+    const target = event.target;
+    const element =
+      target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+
+    if (!element) {
+      return true;
+    }
+
+    return !element.closest("[data-portal-for], [data-test-id='select-option']");
+  }, []);
+
+  const showTrailingGhost =
+    trailingGhostRow === true || (trailingGhostRow === "fullscreen" && isOpen);
+  const { added, onCellEdited, onRowsRemoved, changes, removed, getChangeIndex, onRowAdded } =
+    useDatagridChange(
+      availableColumns,
+      rows,
+      onChange,
+      (areCellsDirty: boolean) => setCellsDirty(areCellsDirty),
+      { materializeTrailingGhostOnEdit: showTrailingGhost },
+    );
+  const dataRowsTotal = rows - removed.length + added.length;
+  const displayRows = showTrailingGhost ? dataRowsTotal + 1 : dataRowsTotal;
+
+  // Glide tracks selection by index and keeps it when the rows behind the grid
+  // change. Report only indices that still exist so consumers cannot crash, and
+  // rewrite the selection itself once loading is over — otherwise a refetch that
+  // briefly reports 1 placeholder row would permanently drop a real selection.
+  useEffect(
+    function pruneAndReportVisibleRowSelection() {
+      if (!selection) {
+        return;
+      }
+
+      const { visibleRows, prunedSelection } = getVisibleGridSelection(selection, displayRows);
+
+      if (!loading && prunedSelection) {
+        setSelectionState(prunedSelection);
+      }
+
+      if (onRowSelectionChange) {
+        // Second parameter is callback to clear selection from parent component
+        onRowSelectionChange(visibleRows, () => {
+          setSelectionState(undefined);
+        });
+      }
+    },
+    [loading, onRowSelectionChange, selection, setSelectionState, displayRows],
+  );
+
+  const hasMenuItem = !!menuItems(0).length;
+  const hasColumnGroups = availableColumns.some(col => col.group);
+  const handleGetCellContent = useCallback(
+    ([column, row]: Item): GridCell => {
+      const item = [column, row] as const;
+      const opts = { changes, added, removed, getChangeIndex };
+      const columnId = availableColumns[column]?.id;
+      const changed = !!changes.current[getChangeIndex(columnId, row)]?.data;
+
+      return {
+        ...getCellContent(item, opts),
+        ...(changed && areCellsDirty
+          ? {
+              themeOverride: {
+                bgCell:
+                  // Consider moving this to MacawUI if we need it in other places
+                  theme === "defaultLight" ? "hsla(215, 100%, 96%, 1)" : "hsla(215, 100%, 21%, 1)",
+              },
+            }
+          : {}),
+        ...(getCellError(item, opts)
+          ? {
+              themeOverride: {
+                bgCell: themeValues.colors.background.critical1,
+              },
+            }
+          : {}),
+      };
+    },
+    [
+      changes,
+      added,
+      removed,
+      getChangeIndex,
+      availableColumns,
+      getCellContent,
+      areCellsDirty,
+      themeValues.colors.background.accent1,
+      themeValues.colors.background.critical1,
+      getCellError,
+    ],
+  );
+  const handleOnCellEdited = useCallback(
+    ([column, row]: Item, newValue: EditableGridCell): void => {
+      onCellEdited([column, row], newValue);
+
+      if (!editor.current) {
+        return;
+      }
+
+      editor.current.updateCells(
+        range(availableColumns.length).map(offset => ({
+          cell: [column + offset, row],
+        })),
+      );
+    },
+    [onCellEdited, availableColumns],
+  );
+
+  const handleCellClick = useCallback(
+    (item: Item, args: CellClickedEventArgs) => {
+      if (shouldSuppressClick()) {
+        return;
+      }
+
+      if (preventRowClickOnSelectionCheckbox(rowMarkers, item[0])) {
+        return;
+      }
+
+      const intentToOpenInNewTab = args.metaKey || args.ctrlKey;
+
+      /**
+       * Assume rowClick is standard click, if ctrl/cmd is used, let it pass to anchor logic and allow to open in a new tab
+       *
+       * TODO: This can be refactored, but every Datagrid is used a little different way
+       */
+      if (onRowClick && !intentToOpenInNewTab) {
+        onRowClick(item);
+
+        return;
+      }
+
+      if (getCellAction(availableColumns, item[0])) {
+        return;
+      }
+
+      handleRowHover(args);
+      activateRowAnchor(rowAnchorRef.current, {
+        openInNewTab: Boolean(args.metaKey || args.ctrlKey),
+      });
+    },
+    [rowMarkers, onRowClick, handleRowHover, rowAnchorRef, shouldSuppressClick, availableColumns],
+  );
+  const handleGridSelectionChange = (gridSelection: GridSelection) => {
+    const selectedRows = Array.from(gridSelection.rows);
+    const nextSelection =
+      showTrailingGhost && selectedRows.includes(dataRowsTotal)
+        ? {
+            ...gridSelection,
+            rows: selectedRows
+              .filter(row => row !== dataRowsTotal)
+              .reduce((acc, row) => acc.add(row), CompactSelection.empty()),
+          }
+        : gridSelection;
+
+    // In readonly we not allow selecting cells, but we allow selcting column
+    if (readonly && !nextSelection.current) {
+      setSelectionState(nextSelection);
+    }
+
+    if (!readonly) {
+      setSelectionState(nextSelection);
+    }
+  };
+  const handleGetThemeOverride = useCallback<GetRowThemeCallback>(
+    (row: number) => {
+      const customOverride = getRowThemeOverrideProp?.(row);
+      const isActiveRow = highlightedRow !== undefined && row === highlightedRow;
+      const isHoverRow = row === hoverRow;
+      const isGhostRow = showTrailingGhost && row === dataRowsTotal;
+
+      if (!customOverride && !isActiveRow && !isHoverRow && !isGhostRow) {
+        return undefined;
+      }
+
+      let stateOverride: Partial<Theme> = {};
+
+      if (isActiveRow) {
+        stateOverride = {
+          bgCell: themeValues.colors.background.default2,
+          bgCellMedium: themeValues.colors.background.default2,
+        };
+      } else if (isHoverRow) {
+        stateOverride = {
+          /*
+            Grid-specific colors. Transparency matters when we highlight entire row.
+          */
+          bgCell: theme === "defaultLight" ? "hsla(220, 18%, 97%, 1)" : "hsla(211, 32%, 19%, 1)",
+          bgCellMedium: themeValues.colors.background.default1Hovered,
+        };
+
+        if (readonly) {
+          stateOverride.accentLight = themeValues.colors.background.default1;
+        }
+      }
+
+      return {
+        ...(isGhostRow
+          ? {
+              bgCell:
+                theme === "defaultLight" ? "hsla(220, 18%, 98%, 1)" : "hsla(211, 32%, 16%, 1)",
+            }
+          : {}),
+        ...customOverride,
+        ...stateOverride,
+      };
+    },
+    [
+      dataRowsTotal,
+      getRowThemeOverrideProp,
+      highlightedRow,
+      hoverRow,
+      readonly,
+      showTrailingGhost,
+      theme,
+      themeValues,
+    ],
+  );
+  const handleHeaderClicked = useCallback(
+    (colIndex: number, event: HeaderClickedEventArgs) => {
+      if (getColumnTooltipContent) {
+        const content = getColumnTooltipContent(colIndex);
+
+        if (content) {
+          setTooltip(content, event.bounds, [colIndex, -1]);
+        } else {
+          clearTooltip();
+        }
+      }
+
+      if (onHeaderClicked) {
+        onHeaderClicked(colIndex, event);
+      }
+    },
+    [clearTooltip, getColumnTooltipContent, onHeaderClicked, setTooltip],
+  );
+  const drawHeader: DrawHeaderCallback = useCallback(
+    args => {
+      const { ctx, rect, isSelected, spriteManager, theme, column } = args;
+      const columnMeta = availableColumns.find(col => col.id === column.id);
+      const isRightAligned = columnMeta?.headerAlign === "right";
+
+      if (isSelected) {
+        ctx.fillStyle = themeValues.colors.background.default1;
+        ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+      }
+
+      if (isSelected && column.id !== "empty" && !columnMeta?.disableReorder) {
+        const iconSize = 16;
+        const padding = 8;
+        const x = rect.x + rect.width - iconSize - padding;
+        const y = rect.y + (rect.height - iconSize) / 2;
+
+        spriteManager.drawSprite("gripVertical", "normal", ctx, x, y, iconSize, theme);
+      }
+
+      if (isRightAligned && column.id !== "empty") {
+        const xPad = theme.cellHorizontalPadding;
+        const gripReserved = isSelected ? 24 : 0;
+        const drawX = rect.x + rect.width - xPad - gripReserved;
+        const font = `${theme.headerFontStyle} ${theme.fontFamily}`;
+
+        ctx.font = font;
+        ctx.fillStyle = isSelected ? theme.textHeaderSelected : theme.textHeader;
+
+        const textY = rect.y + rect.height / 2 + getMiddleCenterBias(ctx, font);
+
+        ctx.textAlign = "right";
+        ctx.fillText(column.title, drawX, textY);
+        ctx.textAlign = "left";
+
+        if (column.icon !== undefined) {
+          const headerSize = theme.headerIconSize;
+
+          spriteManager.drawSprite(
+            column.icon,
+            isSelected ? "selected" : "normal",
+            ctx,
+            rect.x + xPad,
+            rect.y + (rect.height - headerSize) / 2,
+            headerSize,
+            theme,
+          );
+        }
+
+        return true;
+      }
+
+      return false;
+    },
+    [themeValues, availableColumns],
+  );
+  const focusTrailingGhostOrAddRow = useCallback(() => {
+    if (!showTrailingGhost) {
+      onRowAdded();
+
+      return;
+    }
+
+    const ghostRow = dataRowsTotal;
+
+    setSelectionState({
+      current: {
+        cell: [0, ghostRow],
+        range: { x: 0, y: ghostRow, width: 1, height: 1 },
+        rangeStack: [],
+      },
+      columns: CompactSelection.empty(),
+      rows: CompactSelection.empty(),
+    });
+    editor.current?.scrollTo(0, ghostRow, "vertical", 0, 0, { vAlign: "end" });
+  }, [dataRowsTotal, onRowAdded, setSelectionState, showTrailingGhost]);
+  const handleRemoveRows = useCallback(
+    (rowsToRemove: number[]) => {
+      const removable = showTrailingGhost
+        ? rowsToRemove.filter(row => row < dataRowsTotal)
+        : rowsToRemove;
+
+      if (selection?.rows && removable.length > 0) {
+        onRowsRemoved(removable);
+        setSelectionState(undefined);
+      }
+    },
+    [dataRowsTotal, onRowsRemoved, selection, setSelectionState, showTrailingGhost],
+  );
+  const handleColumnResize = useCallback(
+    (column: GridColumn, newSize: number) => {
+      if (tooltip) {
+        clearTooltip();
+      }
+
+      if (!onColumnResize) {
+        return;
+      }
+
+      onColumnResize(column, newSize);
+    },
+    [clearTooltip, onColumnResize, tooltip],
+  );
+  const handleColumnMoved = useCallback(
+    (startIndex: number, endIndex: number) => {
+      if (tooltip) {
+        clearTooltip();
+      }
+
+      if (!onColumnMoved) {
+        return;
+      }
+
+      const startColumn = availableColumns[startIndex];
+      const endColumn = availableColumns[endIndex];
+
+      if (startColumn?.disableReorder || endColumn?.disableReorder) {
+        return;
+      }
+
+      onColumnMoved(startIndex, endIndex);
+    },
+    [availableColumns, clearTooltip, onColumnMoved, tooltip],
+  );
+  const selectionActionsComponent = useMemo(
+    () =>
+      selection?.rows && selection?.rows.length > 0
+        ? selectionActions(Array.from(selection.rows), {
+            removeRows: handleRemoveRows,
+          })
+        : null,
+    [selection, selectionActions, handleRemoveRows],
+  );
+
+  if (loading) {
+    return (
+      <Box data-test-id="datagrid-loader" display="flex" justifyContent="center" marginY={9}>
+        <SaleorThrobber />
+      </Box>
+    );
+  }
+
+  return (
+    <FullScreenContainer open={isOpen} className={fullScreenClasses.fullScreenContainer}>
+      <PreventHistoryBack
+        __height={isOpen ? "100%" : "auto"}
+        onPointerCancelCapture={onPointerCancelCapture}
+        onPointerDownCapture={onPointerDownCapture}
+        onPointerMoveCapture={onPointerMoveCapture}
+        onPointerUpCapture={onPointerUpCapture}
+      >
+        <DashboardCard position="relative" __height={isOpen ? "100%" : "auto"} gap={0}>
+          {renderHeader?.({
+            toggleFullscreen: toggle,
+            addRowOnDatagrid: focusTrailingGhostOrAddRow,
+            isFullscreenOpen: isOpen,
+            isAnimationOpenFinished,
+          })}
+          <DashboardCard.Content
+            height="100%"
+            display="flex"
+            flexDirection="column"
+            paddingX={0}
+            data-test-id="list"
+          >
+            {displayRows > 0 || showEmptyDatagrid ? (
+              <>
+                {selection?.rows && selection?.rows.length > 0 && selectionActionsComponent && (
+                  <div className={classes.actionBtnBar}>{selectionActionsComponent}</div>
+                )}
+                <div className={classes.editorContainer} ref={editorContainerRef}>
+                  <Box
+                    backgroundColor="default1"
+                    borderTopWidth={showTopBorder ? 1 : 0}
+                    borderTopStyle="solid"
+                    borderColor="default1"
+                  />
+                  <DataEditor
+                    width="100%"
+                    experimental={experimental}
+                    {...datagridProps}
+                    customRenderers={customRenderers}
+                    verticalBorder={verticalBorder}
+                    headerIcons={headerIcons}
+                    drawHeader={drawHeader}
+                    theme={finalTheme}
+                    drawFocusRing={false}
+                    rowMarkerTheme={rowMarkerTheme}
+                    className={clsx(classes.datagrid, "dashboard-datagrid")}
+                    getCellContent={handleGetCellContent}
+                    onCellEdited={handleOnCellEdited}
+                    columns={availableColumns}
+                    rows={displayRows}
+                    freezeColumns={freezeColumns}
+                    smoothScrollX={smoothScrollX}
+                    rowMarkers={rowMarkers}
+                    rowSelect="multi"
+                    rowSelectionMode="multi"
+                    rangeSelect="multi-rect"
+                    columnSelect={columnSelect}
+                    getCellsForSelection
+                    onColumnMoved={handleColumnMoved}
+                    onColumnResize={handleColumnResize}
+                    onHeaderClicked={handleHeaderClicked}
+                    onCellClicked={handleCellClick}
+                    onCellActivated={onCellActivated}
+                    onGridSelectionChange={handleGridSelectionChange}
+                    onItemHovered={handleItemHovered}
+                    getRowThemeOverride={handleGetThemeOverride}
+                    gridSelection={selection}
+                    rowHeight={rowHeight}
+                    headerHeight={headerHeight}
+                    ref={editor}
+                    onPaste
+                    isOutsideClick={isMacawPortalOutsideClick}
+                    rightElementProps={{
+                      sticky: true,
+                    }}
+                    rightElement={
+                      <div
+                        className={clsx(classes.rowActionBar, {
+                          [classes.rowActionBarScrolledToRight]: scrolledToRight,
+                          [classes.rowActionvBarWithItems]: hasMenuItem,
+                        })}
+                        style={{ width: rowActionBarWidth }}
+                      >
+                        <div
+                          className={clsx(classes.rowActionBarShadow, {
+                            [classes.rowActionBarShadowActive]: !scrolledToRight && hasMenuItem,
+                          })}
+                        />
+                        <div
+                          className={clsx(classes.columnPicker, {
+                            [classes.columnPickerBackground]: !hasMenuItem,
+                          })}
+                        >
+                          {renderColumnPicker ? renderColumnPicker() : null}
+                        </div>
+                        {hasColumnGroups && (
+                          <div
+                            className={clsx(classes.rowAction, classes.rowColumnGroup, {
+                              [classes.rowActionScrolledToRight]: scrolledToRight,
+                            })}
+                          />
+                        )}
+                        {hasMenuItem &&
+                          Array(displayRows)
+                            .fill(0)
+                            .map((_, index) =>
+                              renderRowActions ? (
+                                renderRowActions(index)
+                              ) : (
+                                <RowActions
+                                  key={`row-actions-${index}`}
+                                  menuItems={menuItems(index)}
+                                  disabled={index >= dataRowsTotal - added.length}
+                                />
+                              ),
+                            )}
+                      </div>
+                    }
+                    rowMarkerWidth={rowMarkerWidth ?? DEFAULT_ROW_MARKER_WIDTH}
+                  />
+                </div>
+              </>
+            ) : (
+              <Box paddingX={6} paddingTop={renderHeader ? 5 : undefined} paddingBottom={6}>
+                {emptyState ?? (
+                  <Placeholder>
+                    <span data-test-id="empty-data-grid-text">{emptyText}</span>
+                  </Placeholder>
+                )}
+              </Box>
+            )}
+          </DashboardCard.Content>
+        </DashboardCard>
+        <TooltipContainer
+          key={tooltip ? `${tooltip.location[0]}-${tooltip.location[1]}` : undefined}
+          bounds={tooltip?.bounds}
+          content={tooltip?.content}
+          side={tooltip?.side}
+          align={tooltip?.align}
+        />
+        {rowAnchor && (
+          <a
+            ref={setRowAnchorRef}
+            className={classes.rowAnchor}
+            data-test-id="datagrid-row-anchor"
+            tabIndex={-1}
+            aria-hidden={true}
+            onClick={rowAnchorHandler}
+            // Only the overlay. Capture on PreventHistoryBack would also swallow
+            // header, column-picker, and row-action clicks after a 6px slop.
+            onClickCapture={onClickCapture}
+          />
+        )}
+      </PreventHistoryBack>
+    </FullScreenContainer>
+  );
+};

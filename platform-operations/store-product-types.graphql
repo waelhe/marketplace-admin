@@ -1,0 +1,21 @@
+query StoreProductTypes {
+  storeProductTypes {
+    id
+    code
+    nameEn
+    nameAr
+    description
+    attributes {
+      assignmentId
+      attributeDefinitionId
+      code
+      nameEn
+      nameAr
+      valueType
+      scope
+      required
+      position
+      options { id code nameEn nameAr position }
+    }
+  }
+}

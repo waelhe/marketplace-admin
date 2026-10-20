@@ -1,0 +1,109 @@
+name: Marketplace Admin — pinned Dashboard build
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+    paths:
+      - "dashboard-overlay/**"
+      - "scripts/apply-dashboard-overlay.mjs"
+      - "platform-e2e/**"
+      - "platform-operations/**"
+      - "codegen-platform.ts"
+      - "scripts/sync-platform-graphql-schema.mjs"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/dashboard-build.yml"
+      - "README.md"
+  pull_request:
+    paths:
+      - "dashboard-overlay/**"
+      - "scripts/apply-dashboard-overlay.mjs"
+      - "platform-e2e/**"
+      - "platform-operations/**"
+      - "codegen-platform.ts"
+      - "scripts/sync-platform-graphql-schema.mjs"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/dashboard-build.yml"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-admin-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard-build:
+    name: Materialize pinned Dashboard, apply overlay, type-check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout overlay repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Checkout exact upstream Dashboard release
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: saleor/saleor-dashboard
+          ref: bc75e988da0fa4fbc3d47378a888d859d070746f
+          path: dashboard
+          persist-credentials: false
+
+      - name: Set up pinned pnpm from packageManager
+        uses: pnpm/action-setup@v5
+        with:
+          run_install: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v6.1.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: dashboard/pnpm-lock.yaml
+
+      - name: Apply platform overlay and verify upstream identity
+        run: node scripts/apply-dashboard-overlay.mjs dashboard
+
+      - name: Install Dashboard dependencies from lockfile
+        working-directory: dashboard
+        run: pnpm install --frozen-lockfile
+
+      - name: Assemble runtime SDL and generate platform operation types
+        working-directory: dashboard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/sync-platform-graphql-schema.mjs
+          pnpm exec graphql-codegen --config codegen-platform.ts
+
+      - name: Type-check upstream application plus platform overlay
+        working-directory: dashboard
+        run: pnpm run check-types:src
+
+      - name: Type-check generated platform Playwright operations
+        working-directory: dashboard
+        run: >-
+          pnpm exec tsc --noEmit --target ES2022 --module ESNext
+          --moduleResolution Bundler --strict --skipLibCheck --types node
+          e2e-marketplace-admin/product-lifecycle.spec.ts
+
+      - name: Build Dashboard-derived platform admin
+        working-directory: dashboard
+        env:
+          CI: "true"
+          VITE_MARKETPLACE_ADMIN_MODE: "true"
+        run: pnpm run build
+
+      - name: Upload built Dashboard artifact
+        if: always() && hashFiles('dashboard/dist/**') != ''
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: marketplace-admin-dashboard-dist
+          path: dashboard/dist/
+          if-no-files-found: warn
+          retention-days: 7

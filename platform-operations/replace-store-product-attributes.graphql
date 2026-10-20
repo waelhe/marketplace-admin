@@ -1,0 +1,9 @@
+mutation ReplaceStoreProductAttributes($id: ID!, $values: [StoreProductAttributeValueInput!]!) {
+  replaceStoreProductAttributes(id: $id, values: $values) {
+    assignmentId
+    textValue
+    numberValue
+    booleanValue
+    optionId
+  }
+}

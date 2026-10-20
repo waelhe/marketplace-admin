@@ -1,0 +1,13 @@
+mutation CreateStoreProduct($input: StoreProductCreateInput!) {
+  createStoreProduct(input: $input) {
+    id
+    storeCategoryCode
+    title
+    description
+    priceMinor
+    currency
+    providerId
+    productTypeId
+    status
+  }
+}

@@ -1,0 +1,18 @@
+.columnHeaderRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--mu-colors-border-default1);
+}
+
+.fieldRows {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 768px) {
+  .columnHeaderRow {
+    display: none;
+  }
+}

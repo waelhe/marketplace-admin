@@ -1,0 +1,14 @@
+mutation CreateStoreProductVariant($productId: ID!, $input: StoreProductVariantCreateInput!) {
+  createStoreProductVariant(productId: $productId, input: $input) {
+    id
+    productId
+    sku
+    name
+    priceMinor
+    currency
+    providerId
+    status
+    stockQuantity
+    reservedQuantity
+  }
+}
